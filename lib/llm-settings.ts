@@ -181,7 +181,7 @@ export async function saveLlmSettings(
   };
 }
 
-function sharedConfig(): ResolvedLlmConfig | null {
+export function sharedConfig(): ResolvedLlmConfig | null {
   const provider = process.env.SHARED_LLM_PROVIDER?.trim();
   const model = process.env.SHARED_LLM_MODEL?.trim();
   const baseUrl = process.env.SHARED_LLM_BASE_URL?.trim() ?? "";

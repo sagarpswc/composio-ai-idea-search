@@ -186,13 +186,37 @@ POST /api/composio-advisor
 
 The advisor reads the local cache, ranks apps and actions by requirement match, then by fewer requested scopes. This gives AI or developer tooling a compact candidate list without sending repeated catalog calls to Composio.
 
-Optional local-model enhancement:
+Optional provider configuration:
 
-- Set `LOCAL_LLM_URL=http://127.0.0.1:11434`
-- Set `LOCAL_LLM_MODEL=qwen2.5:1.5b` (or another small model)
-- Optionally set `LOCAL_LLM_TIMEOUT_MS=30000`
+The app supports user-selected providers and models. Configure a shared fallback in `.env.local`:
 
-When configured, the idea-search endpoint sends the retrieved candidates to the local model and returns AI-refined steps. If the model is unavailable, the deterministic search result is still returned.
+```bash
+SHARED_LLM_PROVIDER=openai
+SHARED_LLM_MODEL=gpt-4o-mini
+SHARED_LLM_API_KEY=sk_...
+SHARED_LLM_BASE_URL=
+SHARED_LLM_DAILY_LIMIT=20
+```
+
+Supported providers:
+- OpenAI
+- OpenRouter
+- Anthropic (Claude)
+- xAI (Grok)
+- Ollama
+- Custom OpenAI-compatible endpoint
+
+Users can also enter their own API key in the dashboard **AI settings** tab. Personal keys are encrypted on the server and are never returned to the browser. When no personal key is configured, the app uses shared platform access subject to the daily limit.
+
+Backward-compatible local model configuration:
+
+```bash
+LOCAL_LLM_URL=http://127.0.0.1:11434
+LOCAL_LLM_MODEL=qwen2.5:0.5b
+LOCAL_LLM_TIMEOUT_MS=60000
+```
+
+When configured, the idea-search endpoint can send retrieved candidates to the configured model and return AI-refined steps. If no model is available, the deterministic search result is still returned.
 
 ## Docker
 

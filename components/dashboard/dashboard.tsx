@@ -8,6 +8,7 @@ import {
   BrainCircuit,
   Boxes,
   ChevronDown,
+  Settings,
   ExternalLink,
   LayoutGrid,
   Loader2,
@@ -27,6 +28,7 @@ import { AppCard } from "@/components/dashboard/app-card";
 import { ConnectedApps } from "@/components/dashboard/connected-apps";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { ToolPlayground } from "@/components/dashboard/tool-playground";
+import { AiSettings } from "@/components/dashboard/ai-settings";
 import { IdeaSearch } from "@/components/dashboard/idea-search";
 import type {
   CatalogResponse,
@@ -532,6 +534,10 @@ export function Dashboard({ user }: { user: DashboardUser }) {
                     <BrainCircuit className="size-3.5" />
                     AI idea search
                   </TabsTrigger>
+                  <TabsTrigger value="ai-settings">
+                    <Settings className="size-3.5" />
+                    AI settings
+                  </TabsTrigger>
                 </TabsList>
                 <span className="text-[11px] text-muted-foreground">
                   {filter === "connected"
@@ -665,6 +671,10 @@ export function Dashboard({ user }: { user: DashboardUser }) {
 
               <TabsContent value="ideas" className="mt-4">
                 <IdeaSearch />
+              </TabsContent>
+
+              <TabsContent value="ai-settings" className="mt-4">
+                <AiSettings />
               </TabsContent>
             </Tabs>
           </div>
