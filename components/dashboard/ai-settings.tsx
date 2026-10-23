@@ -1,10 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Save, Settings, TestTube2 } from "lucide-react";
+import { ChevronDown, Loader2, Save, Settings, TestTube2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
@@ -51,6 +59,9 @@ export function AiSettings() {
   const [apiKey, setApiKey] = useState("");
   const [useShared, setUseShared] = useState(true);
   const [hasApiKey, setHasApiKey] = useState(false);
+  const [models, setModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelError, setModelError] = useState("");
   const [testResult, setTestResult] = useState<{ ok: boolean; preview: string | null } | null>(null);
 
   useEffect(() => {
@@ -118,6 +129,44 @@ export function AiSettings() {
     }
   }
 
+  async function loadModels() {
+    setModelError("");
+    setTestResult(null);
+
+    if (provider !== "ollama" && !apiKey.trim()) {
+      setModelError("Paste an API key before loading models.");
+      return;
+    }
+
+    setLoadingModels(true);
+    try {
+      const response = await fetch("/api/llm-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider,
+          baseUrl,
+          apiKey: apiKey.trim() || undefined,
+        }),
+      });
+      const data = (await response.json()) as { models?: string[]; error?: string };
+      if (!response.ok || !Array.isArray(data.models)) {
+        throw new Error(data.error || "Could not load models.");
+      }
+
+      setModels(data.models);
+      if (!model || !data.models.includes(model)) {
+        setModel(data.models[0] ?? "");
+      }
+      setMessage(`Loaded ${data.models.length} model${data.models.length === 1 ? "" : "s"}.`);
+    } catch (loadModelError) {
+      setModels([]);
+      setModelError(loadModelError instanceof Error ? loadModelError.message : "Could not load models.");
+    } finally {
+      setLoadingModels(false);
+    }
+  }
+
   async function test() {
     setTesting(true);
     setError("");
@@ -162,31 +211,60 @@ export function AiSettings() {
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="ai-provider">Provider</Label>
-              <select
-                id="ai-provider"
-                value={provider}
-                onChange={(event) => setProvider(event.target.value as Provider)}
-                className="h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-              >
-                {PROVIDERS.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
+              <Label>Provider</Label>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="h-9 w-full justify-between">
+                    {PROVIDERS.find((item) => item.value === provider)?.label ?? "Select provider"}
+                    <ChevronDown className="size-4 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-[--radix-dropdown-menu-trigger-width]">
+                  <DropdownMenuLabel>Provider</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {PROVIDERS.map((item) => (
+                    <DropdownMenuItem
+                      key={item.value}
+                      onSelect={() => {
+                        setProvider(item.value);
+                        setModels([]);
+                        setModel("");
+                        setModelError("");
+                      }}
+                    >
+                      {item.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="ai-model">Model</Label>
-              <Input
-                id="ai-model"
-                value={model}
-                onChange={(event) => setModel(event.target.value)}
-                placeholder="gpt-4o-mini, claude-3-5-sonnet, grok-2, qwen2.5:0.5b…"
-                autoComplete="off"
-                className="h-9"
-              />
+              <div className="flex items-center justify-between gap-2">
+                <Label>Model</Label>
+                <Button type="button" variant="outline" size="sm" onClick={() => void loadModels()} disabled={loadingModels} className="h-7 px-2 text-xs">
+                  {loadingModels ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                  {loadingModels ? "Loading" : "Load models"}
+                </Button>
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="h-9 w-full justify-between" disabled={models.length === 0}>
+                    {model || (models.length ? "Select a model" : "Load models first")}
+                    <ChevronDown className="size-4 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-[--radix-dropdown-menu-trigger-width]">
+                  <DropdownMenuLabel>Models</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {models.map((item) => (
+                    <DropdownMenuItem key={item} onSelect={() => setModel(item)}>
+                      {item}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {modelError ? <p className="text-xs text-destructive">{modelError}</p> : null}
             </div>
           </div>
 

@@ -232,11 +232,15 @@ export async function resolveLlmConfig(userId: string): Promise<ResolvedLlmConfi
         dailyLimit: 0,
       };
     } catch {
-      // Fall through to shared configuration if the stored key cannot be read.
+      // Fall through to shared configuration only when the user explicitly allows it.
     }
   }
 
-  return sharedConfig();
+  if (settings?.useShared) {
+    return sharedConfig();
+  }
+
+  return null;
 }
 
 type UsageFile = { users?: Record<string, { date: string; count: number }> };
