@@ -31,6 +31,19 @@ type IdeaApp = {
   actions: IdeaAction[];
 };
 
+type IdeaResearch = {
+  slug: string;
+  name: string;
+  score: number;
+  matchedTerms: string[];
+  matchedFields: string[];
+  categories: string[];
+  scopes: string[];
+  toolsCount: number;
+  actions: IdeaAction[];
+  reason: string;
+};
+
 type IdeaCombination = {
   rank: number;
   score: number;
@@ -43,6 +56,7 @@ type IdeaResponse = {
   requirement: string;
   combinations: IdeaCombination[];
   candidates: IdeaApp[];
+  research?: IdeaResearch[];
   aiSteps?: string[] | null;
   aiModel?: string | null;
   note?: string;
@@ -193,6 +207,62 @@ export function IdeaSearch() {
           ) : null}
         </CardContent>
       </Card>
+
+      {result?.research?.length ? (
+        <Card className="gap-4 shadow-sm">
+          <CardHeader className="border-b">
+            <div className="flex items-start gap-2.5">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Sparkles className="size-4" />
+              </span>
+              <div>
+                <CardTitle className="text-base">Research summary</CardTitle>
+                <CardDescription className="mt-1 max-w-2xl text-xs leading-5">
+                  The search checked app names, descriptions, categories, scopes, and actions before ranking combinations.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {result.research.map((item) => (
+              <div key={item.slug} className="rounded-xl border bg-background/50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">{item.name}</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.reason}</p>
+                  </div>
+                  <Badge variant="outline" className="font-normal">
+                    {item.score} match
+                  </Badge>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {item.matchedTerms.map((term) => (
+                    <Badge key={`${item.slug}-${term}`} variant="secondary" className="font-normal">
+                      {term}
+                    </Badge>
+                  ))}
+                  {item.matchedFields.map((field) => (
+                    <Badge key={`${item.slug}-field-${field}`} variant="outline" className="font-normal text-muted-foreground">
+                      {field}
+                    </Badge>
+                  ))}
+                </div>
+                {item.scopes.length > 0 ? (
+                  <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                    <span className="font-medium text-foreground">Scopes:</span> {item.scopes.join(", ")}
+                  </p>
+                ) : null}
+                {item.actions.length > 0 ? (
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    <span className="font-medium text-foreground">Relevant actions:</span>{" "}
+                    {item.actions.map((action) => action.name).join(", ")}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {result?.aiSteps?.length ? (
         <Card className="gap-4 shadow-sm">

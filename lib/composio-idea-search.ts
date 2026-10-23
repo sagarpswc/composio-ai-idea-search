@@ -19,6 +19,20 @@ export type IdeaApp = {
   actions: IdeaAction[];
 };
 
+export type IdeaResearch = {
+  slug: string;
+  name: string;
+  score: number;
+  matchedTerms: string[];
+  matchedFields: string[];
+  scopeCount: number;
+  categories: string[];
+  scopes: string[];
+  toolsCount: number;
+  actions: IdeaAction[];
+  reason: string;
+};
+
 export type IdeaCombination = {
   rank: number;
   score: number;
@@ -87,20 +101,22 @@ export async function searchComposioIdeas(requirement: string, limit = 8): Promi
   requirement: string;
   combinations: IdeaCombination[];
   candidates: IdeaApp[];
+  research: IdeaResearch[];
 }> {
   const tokens = tokenize(requirement);
   if (tokens.length === 0) {
-    return { requirement, combinations: [], candidates: [] };
+    return { requirement, combinations: [], candidates: [], research: [] };
   }
 
   let cache: { toolkits?: Record<string, { value?: any }>; tools?: Record<string, { value?: any[] }> } = {};
   try {
     cache = JSON.parse(await readFile(CACHE_FILE, "utf8"));
   } catch {
-    return { requirement, combinations: [], candidates: [] };
+    return { requirement, combinations: [], candidates: [], research: [] };
   }
 
   const candidates: IdeaApp[] = [];
+  const research: IdeaResearch[] = [];
 
   for (const [slug, entry] of Object.entries(cache.toolkits ?? {})) {
     const toolkit = entry?.value;
@@ -128,6 +144,18 @@ export async function searchComposioIdeas(requirement: string, limit = 8): Promi
       .join(" ")
       .toLowerCase();
 
+    const fieldMatches = {
+      name: tokens.filter((token) => toolkit.name.toLowerCase().includes(token)),
+      description: tokens.filter((token) => (toolkit.description ?? "").toLowerCase().includes(token)),
+      categories: tokens.filter((token) => (toolkit.categories ?? []).some((category: unknown) => String(category).toLowerCase().includes(token))),
+      scopes: tokens.filter((token) => scopes.some((scope) => scope.toLowerCase().includes(token))),
+      actions: tokens.filter((token) => actions.some((action) => `${action.name} ${action.description} ${action.slug}`.toLowerCase().includes(token))),
+    };
+    const matchedTerms = [...new Set(Object.values(fieldMatches).flat())];
+    const matchedFields = Object.entries(fieldMatches)
+      .filter(([, terms]) => terms.length > 0)
+      .map(([field]) => field);
+
     const nameBoost = tokens.reduce((sum, token) => {
       const normalized = toolkit.name.toLowerCase().replace(/[^a-z0-9]+/g, "");
       if (normalized === token || slug === token) return sum + 16;
@@ -137,13 +165,29 @@ export async function searchComposioIdeas(requirement: string, limit = 8): Promi
     const score = tokens.reduce((sum, token) => sum + (toolkitText.includes(token) ? 1 : 0), 0) + nameBoost;
     if (score === 0 && actionMatches.length === 0) continue;
 
-    candidates.push({
+    const reason = `${toolkit.name} matched ${matchedTerms.length} of ${tokens.length} requirement terms across ${matchedFields.join(", ") || "metadata"}. It exposes ${actions.length} actions and requests ${scopes.length} scopes.`;
+
+    const candidate = {
       slug,
       name: toolkit.name,
       score: score + actionMatches.reduce((sum, action) => sum + action.score, 0),
       scopeCount: scopes.length,
       scopes,
       actions: actionMatches.length > 0 ? actionMatches : actions.slice(0, 2).map((action) => ({ slug: action.slug, name: action.name, score: 0 })),
+    };
+    candidates.push(candidate);
+    research.push({
+      slug,
+      name: toolkit.name,
+      score: candidate.score,
+      matchedTerms,
+      matchedFields,
+      categories: toolkit.categories ?? [],
+      scopes,
+      toolsCount: toolkit.toolsCount ?? actions.length,
+      scopeCount: scopes.length,
+      actions: candidate.actions,
+      reason,
     });
   }
 
@@ -241,6 +285,9 @@ export async function searchComposioIdeas(requirement: string, limit = 8): Promi
     requirement,
     combinations: ranked,
     candidates: candidates.slice(0, 12),
+    research: research
+      .sort((a, b) => b.score - a.score || a.scopeCount - b.scopeCount || a.name.localeCompare(b.name))
+      .slice(0, 8),
   };
 }
 export type AiIdeaEnhancement = {
