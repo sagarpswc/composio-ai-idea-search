@@ -213,6 +213,7 @@ curl http://localhost:3000/api/health
 - Code of conduct: `CODE_OF_CONDUCT.md`
 - Issue templates: `.github/ISSUE_TEMPLATE/`
 - CI workflow template: `docs/ci.yml` (copy to `.github/workflows/ci.yml` to enable GitHub Actions)
+- Roadmap: `ROADMAP.md`
 
 ## Useful commands
 
