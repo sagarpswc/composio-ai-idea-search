@@ -127,7 +127,9 @@ export async function searchComposioIdeas(requirement: string, limit = 8): Promi
 
     const nameBoost = tokens.reduce((sum, token) => {
       const normalized = toolkit.name.toLowerCase().replace(/[^a-z0-9]+/g, "");
-      return sum + (normalized.includes(token) || slug.includes(token) ? 8 : 0);
+      if (normalized === token || slug === token) return sum + 16;
+      if (normalized.includes(token) || slug.includes(token)) return sum + 8;
+      return sum;
     }, 0);
     const score = tokens.reduce((sum, token) => sum + (toolkitText.includes(token) ? 1 : 0), 0) + nameBoost;
     if (score === 0 && actionMatches.length === 0) continue;
@@ -144,10 +146,29 @@ export async function searchComposioIdeas(requirement: string, limit = 8): Promi
 
   candidates.sort((a, b) => b.score - a.score || a.scopeCount - b.scopeCount || a.name.localeCompare(b.name));
   const topApps = candidates.slice(0, 8);
+  const requiredApps = topApps.filter((app) =>
+    tokens.some((token) => app.slug.includes(token) || app.name.toLowerCase().replace(/[^a-z0-9]+/g, "").includes(token))
+  );
 
   const combinationList: IdeaCombination[] = [];
   for (let size = 1; size <= Math.min(3, topApps.length); size += 1) {
     for (const combo of combinations(topApps, size)) {
+      if (requiredApps.length > 0 && requiredApps.length <= size && !requiredApps.every((app) => combo.includes(app))) {
+        continue;
+      }
+
+      const covered = new Set<string>();
+      const addsNewCoverage = combo.every((app) => {
+        const appTokens = tokens.filter((token) => {
+          const text = [app.name, ...app.actions.map((action) => action.name)].join(" ").toLowerCase();
+          return text.includes(token);
+        });
+        const newTokens = appTokens.filter((token) => !covered.has(token));
+        if (newTokens.length === 0) return false;
+        newTokens.forEach((token) => covered.add(token));
+        return true;
+      });
+      if (!addsNewCoverage) continue;
       const score = combo.reduce((sum, app) => sum + app.score, 0);
       const totalScopes = combo.reduce((sum, app) => sum + app.scopeCount, 0);
       const steps: string[] = [];
@@ -177,6 +198,11 @@ export async function searchComposioIdeas(requirement: string, limit = 8): Promi
     }
   }
 
+  const directAppCount = (combo: IdeaCombination) =>
+    combo.apps.filter((app) =>
+      tokens.some((token) => app.slug.includes(token) || app.name.toLowerCase().replace(/[^a-z0-9]+/g, "").includes(token))
+    ).length;
+
   const tokenCoverage = (combo: IdeaCombination) => {
     const text = combo.apps.map((app) => [app.name, ...app.actions.map((action) => action.name)].join(" ")).join(" ").toLowerCase();
     return tokens.reduce((sum, token) => sum + (text.includes(token) ? 1 : 0), 0);
@@ -185,6 +211,8 @@ export async function searchComposioIdeas(requirement: string, limit = 8): Promi
   combinationList.sort((a, b) => {
     const coverageDiff = tokenCoverage(b) - tokenCoverage(a);
     if (coverageDiff !== 0) return coverageDiff;
+    const directDiff = directAppCount(b) - directAppCount(a);
+    if (directDiff !== 0) return directDiff;
     if (b.score !== a.score) return b.score - a.score;
     if (a.totalScopes !== b.totalScopes) return a.totalScopes - b.totalScopes;
     return a.apps.length - b.apps.length;

@@ -1,5 +1,8 @@
 # Composio AI Idea Search
 
+[![CI](https://github.com/sagarpswc/composio-ai-idea-search/actions/workflows/ci.yml/badge.svg)](https://github.com/sagarpswc/composio-ai-idea-search/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A multi-user Next.js application where each registered email/password account gets its **own isolated Composio session**. It browses Composio's live toolkit catalog, caches app metadata, scopes, and actions locally, and includes an AI idea search that suggests implementation steps and ranked tool combinations without generating code.
 
 There is no hardcoded app list: the catalog, connection state, Connect Links, and tool execution all come from Composio at runtime.
@@ -10,6 +13,7 @@ There is no hardcoded app list: the catalog, connection state, Connect Links, an
 - Isolates every account with a stable Composio user ID.
 - Fetches the full toolkit catalog with pagination and search.
 - Caches toolkit metadata, scopes, and action previews in `.data/composio-cache.json` to avoid repeated backend calls.
+- Searches the local Composio cache for AI idea workflows and returns ranked combinations with implementation steps only.
 - Generates a Composio **Connect Link** for any toolkit a user selects.
 - Shows connected apps and lets users disconnect them.
 - Executes any tool through the same account-scoped session.
@@ -184,6 +188,32 @@ Optional local-model enhancement:
 - Optionally set `LOCAL_LLM_TIMEOUT_MS=30000`
 
 When configured, the idea-search endpoint sends the retrieved candidates to the local model and returns AI-refined steps. If the model is unavailable, the deterministic search result is still returned.
+
+## Docker
+
+Run the app and local model with Docker Compose:
+
+```bash
+cp .env.example .env
+# Edit .env and set COMPOSIO_API_KEY
+docker compose up --build
+```
+
+The Compose file starts Ollama, pulls `qwen2.5:0.5b`, bulk-feeds the local cache, and starts the Next.js app. The app is available at `http://localhost:3000`.
+
+Health check:
+
+```bash
+curl http://localhost:3000/api/health
+```
+
+## Open source
+
+- License: MIT (`LICENSE`)
+- Contributing guide: `CONTRIBUTING.md`
+- Code of conduct: `CODE_OF_CONDUCT.md`
+- Issue templates: `.github/ISSUE_TEMPLATE/`
+- CI workflow: `.github/workflows/ci.yml`
 
 ## Useful commands
 
