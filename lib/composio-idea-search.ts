@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { generateLlmSteps } from "@/lib/llm-settings";
 
 const CACHE_FILE = path.join(process.cwd(), ".data", "composio-cache.json");
 
@@ -26,12 +27,14 @@ export type IdeaCombination = {
   steps: string[];
 };
 
+const STOP_WORDS = new Set(["and", "the", "for", "with", "from", "into", "using", "then", "that", "this"]);
+
 function tokenize(value: string): string[] {
   return value
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .map((token) => token.trim())
-    .filter((token) => token.length > 2);
+    .filter((token) => token.length > 2 && !STOP_WORDS.has(token));
 }
 
 function collectScopes(authConfigDetails: unknown): string[] {
@@ -112,7 +115,7 @@ export async function searchComposioIdeas(requirement: string, limit = 8): Promi
         return { slug: action.slug, name: action.name, score };
       })
       .filter((action) => action.score > 0)
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
       .slice(0, 4);
 
     const toolkitText = [
@@ -146,9 +149,23 @@ export async function searchComposioIdeas(requirement: string, limit = 8): Promi
 
   candidates.sort((a, b) => b.score - a.score || a.scopeCount - b.scopeCount || a.name.localeCompare(b.name));
   const topApps = candidates.slice(0, 8);
-  const requiredApps = topApps.filter((app) =>
-    tokens.some((token) => app.slug.includes(token) || app.name.toLowerCase().replace(/[^a-z0-9]+/g, "").includes(token))
-  );
+  const directApps = tokens
+    .map((token) => {
+      const matches = topApps.filter((app) => {
+        const normalized = app.name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+        return normalized.includes(token) || app.slug.includes(token);
+      });
+      return matches.sort((a, b) => {
+        const aExact = a.slug === token || a.name.toLowerCase().replace(/[^a-z0-9]+/g, "") === token ? 1 : 0;
+        const bExact = b.slug === token || b.name.toLowerCase().replace(/[^a-z0-9]+/g, "") === token ? 1 : 0;
+        if (bExact !== aExact) return bExact - aExact;
+        if (b.score !== a.score) return b.score - a.score;
+        return a.scopeCount - b.scopeCount;
+      })[0];
+    })
+    .filter((app): app is IdeaApp => Boolean(app))
+    .filter((app, index, apps) => apps.findIndex((candidate) => candidate.slug === app.slug) === index);
+  const requiredApps = directApps;
 
   const combinationList: IdeaCombination[] = [];
   for (let size = 1; size <= Math.min(3, topApps.length); size += 1) {
@@ -198,9 +215,9 @@ export async function searchComposioIdeas(requirement: string, limit = 8): Promi
     }
   }
 
-  const directAppCount = (combo: IdeaCombination) =>
+  const exactDirectAppCount = (combo: IdeaCombination) =>
     combo.apps.filter((app) =>
-      tokens.some((token) => app.slug.includes(token) || app.name.toLowerCase().replace(/[^a-z0-9]+/g, "").includes(token))
+      tokens.some((token) => app.slug === token || app.name.toLowerCase().replace(/[^a-z0-9]+/g, "") === token)
     ).length;
 
   const tokenCoverage = (combo: IdeaCombination) => {
@@ -211,11 +228,12 @@ export async function searchComposioIdeas(requirement: string, limit = 8): Promi
   combinationList.sort((a, b) => {
     const coverageDiff = tokenCoverage(b) - tokenCoverage(a);
     if (coverageDiff !== 0) return coverageDiff;
-    const directDiff = directAppCount(b) - directAppCount(a);
+    const directDiff = exactDirectAppCount(b) - exactDirectAppCount(a);
     if (directDiff !== 0) return directDiff;
+    if (a.apps.length !== b.apps.length) return a.apps.length - b.apps.length;
     if (b.score !== a.score) return b.score - a.score;
     if (a.totalScopes !== b.totalScopes) return a.totalScopes - b.totalScopes;
-    return a.apps.length - b.apps.length;
+    return a.apps.map((app) => app.name).join().localeCompare(b.apps.map((app) => app.name).join());
   });
   const ranked = combinationList.slice(0, limit).map((item, index) => ({ ...item, rank: index + 1 }));
 
@@ -225,90 +243,22 @@ export async function searchComposioIdeas(requirement: string, limit = 8): Promi
     candidates: candidates.slice(0, 12),
   };
 }
-
 export type AiIdeaEnhancement = {
   model: string;
   steps: string[];
+  source: string;
 };
 
-export async function enhanceIdeaSearchWithLocalModel(
+export async function enhanceIdeaSearchWithConfiguredModel(
+  userId: string,
   requirement: string,
   result: { combinations: IdeaCombination[]; candidates: IdeaApp[] }
 ): Promise<AiIdeaEnhancement | null> {
-  const baseUrl = process.env.LOCAL_LLM_URL?.trim();
-  const model = process.env.LOCAL_LLM_MODEL?.trim();
-  if (!baseUrl || !model) return null;
-
-  const endpoint = baseUrl.endsWith("/api/generate")
-    ? baseUrl
-    : `${baseUrl.replace(/\/+$/, "")}/api/generate`;
-
-  const timeoutMs = Number(process.env.LOCAL_LLM_TIMEOUT_MS ?? 30000);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  const best = result.combinations[0];
-  const alternatives = result.combinations.slice(1, 4);
-  const context = [
-    `Best combination: ${best.apps.map((app) => `${app.name} (${app.slug})`).join(" + ")}.`,
-    `Best actions: ${best.apps.flatMap((app) => app.actions.map((action) => action.slug)).join(", ")}.`,
-    `Best total scopes: ${best.totalScopes}.`,
-    ...alternatives.map((combination, index) => {
-      const apps = combination.apps.map((app) => `${app.name} (${app.slug})`).join(" + ");
-      const actions = combination.apps.flatMap((app) => app.actions.map((action) => action.slug)).join(", ");
-      return `Alternative ${index + 1}: ${apps}. Actions: ${actions}. Scopes: ${combination.totalScopes}.`;
-    }),
-  ].join("\n");
-
-  const prompt = [
-    "You are a Composio workflow planning assistant.",
-    "Use only the supplied Composio apps and actions.",
-    "Return 5 to 8 concise implementation steps only.",
-    "Each step must be a plain English sentence and start with an action verb.",
-    "Do not include code, snippets, JSON, tool slugs, tool arguments, or invented user-interface actions.",
-    "Example:",
-    "1. Connect GitHub if it is not already connected.",
-    "2. Create the issue in GitHub.",
-    "3. Review the requested GitHub scopes.",
-    "4. Connect Slack if it is not already connected.",
-    "5. Send the notification in Slack.",
-    "6. Review the requested Slack scopes.",
-    "Choose the best combination, then rank alternatives by requirement fit and fewer total scopes.",
-    `Requirement: ${requirement}`,
-    context,
-    "Steps:",
-  ].join("\n");
-
-  try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        prompt,
-        stream: false,
-        options: { temperature: 0, num_predict: 180 },
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) return null;
-
-    const data = (await response.json()) as { response?: unknown };
-    if (typeof data.response !== "string") return null;
-
-    const steps = data.response
-      .split(/\r?\n/)
-      .map((line) => line.replace(/^\s*(?:\d+[.)]|[-*])\s*/, "").trim())
-      .filter((line) => line.length > 0 && !line.includes("```") && !/\b(const|let|var|function|import|export)\b/.test(line));
-
-    const looksLikeToolSlugs = steps.length > 0 && steps.every((step) => /^[A-Z0-9_]+$/.test(step));
-    if (looksLikeToolSlugs) return null;
-
-    return steps.length > 0 ? { model, steps } : null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
+  const enhanced = await generateLlmSteps(userId, requirement, result);
+  if (!enhanced) return null;
+  return {
+    model: enhanced.model,
+    steps: enhanced.steps,
+    source: enhanced.source,
+  };
 }

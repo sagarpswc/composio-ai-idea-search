@@ -18,6 +18,12 @@ There is no hardcoded app list: the catalog, connection state, Connect Links, an
 - Executes any tool through the same account-scoped session.
 - Ships with a light/dark theme and a shadcn/ui dashboard.
 
+## Screenshots
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+![AI idea search](docs/screenshots/ai-idea-search.png)
+
 ## Setup
 
 The fastest setup is one command after adding your Composio project key:

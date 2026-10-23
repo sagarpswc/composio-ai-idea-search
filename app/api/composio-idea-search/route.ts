@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiError, isRecord } from "@/lib/http";
 import { requireUserId } from "@/lib/identity";
-import { enhanceIdeaSearchWithLocalModel, searchComposioIdeas } from "@/lib/composio-idea-search";
+import { enhanceIdeaSearchWithConfiguredModel, searchComposioIdeas } from "@/lib/composio-idea-search";
 
 export const runtime = "nodejs";
 
@@ -23,9 +23,9 @@ export async function POST(request: Request) {
       ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 20)
       : 8;
 
-    await requireUserId();
+    const userId = await requireUserId();
     const result = await searchComposioIdeas(requirement, limit);
-    const ai = await enhanceIdeaSearchWithLocalModel(requirement, result);
+    const ai = await enhanceIdeaSearchWithConfiguredModel(userId, requirement, result);
 
     return NextResponse.json({
       ...result,
