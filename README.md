@@ -1,6 +1,5 @@
 # Composio AI Idea Search
 
-[![CI](https://github.com/sagarpswc/composio-ai-idea-search/actions/workflows/ci.yml/badge.svg)](https://github.com/sagarpswc/composio-ai-idea-search/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A multi-user Next.js application where each registered email/password account gets its **own isolated Composio session**. It browses Composio's live toolkit catalog, caches app metadata, scopes, and actions locally, and includes an AI idea search that suggests implementation steps and ranked tool combinations without generating code.
@@ -213,7 +212,7 @@ curl http://localhost:3000/api/health
 - Contributing guide: `CONTRIBUTING.md`
 - Code of conduct: `CODE_OF_CONDUCT.md`
 - Issue templates: `.github/ISSUE_TEMPLATE/`
-- CI workflow: `.github/workflows/ci.yml`
+- CI workflow template: `docs/ci.yml` (copy to `.github/workflows/ci.yml` to enable GitHub Actions)
 
 ## Useful commands
 
