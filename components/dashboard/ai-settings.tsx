@@ -59,8 +59,9 @@ export function AiSettings() {
   const [apiKey, setApiKey] = useState("");
   const [useShared, setUseShared] = useState(true);
   const [hasApiKey, setHasApiKey] = useState(false);
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<{ free: string[]; paid: string[] }>({ free: [], paid: [] });
   const [loadingModels, setLoadingModels] = useState(false);
+  const [modelSearch, setModelSearch] = useState("");
   const [modelError, setModelError] = useState("");
   const [testResult, setTestResult] = useState<{ ok: boolean; preview: string | null } | null>(null);
 
@@ -94,6 +95,21 @@ export function AiSettings() {
       cancelled = true;
     };
   }, []);
+
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const canLoad =
+        provider === "ollama" ||
+        apiKey.trim().length >= 20 ||
+        hasApiKey;
+      if (canLoad) {
+        void loadModels();
+      }
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [provider, apiKey, baseUrl, hasApiKey]);
 
   async function save() {
     setSaving(true);
@@ -147,20 +163,23 @@ export function AiSettings() {
           provider,
           baseUrl,
           apiKey: apiKey.trim() || undefined,
+          useStoredKey: !apiKey.trim() && hasApiKey,
         }),
       });
-      const data = (await response.json()) as { models?: string[]; error?: string };
-      if (!response.ok || !Array.isArray(data.models)) {
+      const data = (await response.json()) as { free?: string[]; paid?: string[]; error?: string };
+      if (!response.ok || !Array.isArray(data.free) || !Array.isArray(data.paid)) {
         throw new Error(data.error || "Could not load models.");
       }
 
-      setModels(data.models);
-      if (!model || !data.models.includes(model)) {
-        setModel(data.models[0] ?? "");
+      const groups = { free: data.free, paid: data.paid };
+      const allModels = [...groups.free, ...groups.paid];
+      setModels(groups);
+      if (allModels.length > 0 && (!model || !allModels.includes(model))) {
+        setModel(allModels[0]);
       }
-      setMessage(`Loaded ${data.models.length} model${data.models.length === 1 ? "" : "s"}.`);
+      setMessage(`Loaded ${allModels.length} model${allModels.length === 1 ? "" : "s"}.`);
     } catch (loadModelError) {
-      setModels([]);
+      setModels({ free: [], paid: [] });
       setModelError(loadModelError instanceof Error ? loadModelError.message : "Could not load models.");
     } finally {
       setLoadingModels(false);
@@ -227,7 +246,7 @@ export function AiSettings() {
                       key={item.value}
                       onSelect={() => {
                         setProvider(item.value);
-                        setModels([]);
+                        setModels({ free: [], paid: [] });
                         setModel("");
                         setModelError("");
                       }}
@@ -242,28 +261,63 @@ export function AiSettings() {
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <Label>Model</Label>
-                <Button type="button" variant="outline" size="sm" onClick={() => void loadModels()} disabled={loadingModels} className="h-7 px-2 text-xs">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   {loadingModels ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                  {loadingModels ? "Loading" : "Load models"}
-                </Button>
+                  {models.free.length + models.paid.length > 0
+                    ? `${models.free.length + models.paid.length} loaded`
+                    : "Paste a key to load models"}
+                </div>
               </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="h-9 w-full justify-between" disabled={models.length === 0}>
-                    {model || (models.length ? "Select a model" : "Load models first")}
-                    <ChevronDown className="size-4 text-muted-foreground" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-[--radix-dropdown-menu-trigger-width]">
-                  <DropdownMenuLabel>Models</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {models.map((item) => (
-                    <DropdownMenuItem key={item} onSelect={() => setModel(item)}>
-                      {item}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+
+              <div className="relative">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="h-9 w-full justify-between" disabled={models.free.length + models.paid.length === 0}>
+                      {model || "Load models first"}
+                      <ChevronDown className="size-4 text-muted-foreground" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-[--radix-dropdown-menu-trigger-width] p-1">
+                    <div className="px-1 pb-1">
+                      <Input
+                        value={modelSearch}
+                        onChange={(event) => setModelSearch(event.target.value)}
+                        placeholder="Search models…"
+                        className="h-8"
+                        onKeyDown={(event) => event.stopPropagation()}
+                      />
+                    </div>
+                    <DropdownMenuSeparator />
+                    {models.free.length > 0 ? (
+                      <>
+                        <DropdownMenuLabel>Free models</DropdownMenuLabel>
+                        {models.free
+                          .filter((item) => item.toLowerCase().includes(modelSearch.toLowerCase()))
+                          .map((item) => (
+                            <DropdownMenuItem key={item} onSelect={() => setModel(item)}>
+                              {item}
+                            </DropdownMenuItem>
+                          ))}
+                      </>
+                    ) : null}
+                    {models.paid.length > 0 ? (
+                      <>
+                        <DropdownMenuLabel>Paid models</DropdownMenuLabel>
+                        {models.paid
+                          .filter((item) => item.toLowerCase().includes(modelSearch.toLowerCase()))
+                          .map((item) => (
+                            <DropdownMenuItem key={item} onSelect={() => setModel(item)}>
+                              {item}
+                            </DropdownMenuItem>
+                          ))}
+                      </>
+                    ) : null}
+                    {models.free.length + models.paid.length === 0 ? (
+                      <DropdownMenuItem disabled>No models loaded</DropdownMenuItem>
+                    ) : null}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
               {modelError ? <p className="text-xs text-destructive">{modelError}</p> : null}
             </div>
           </div>

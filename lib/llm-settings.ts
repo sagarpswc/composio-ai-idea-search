@@ -251,6 +251,16 @@ async function readUsage(): Promise<UsageFile> {
   return parsed as UsageFile;
 }
 
+export async function getStoredApiKey(userId: string): Promise<string | null> {
+  const settings = (await readSettings())[userId];
+  if (!settings?.encryptedApiKey) return null;
+  try {
+    return decrypt(settings.encryptedApiKey);
+  } catch {
+    return null;
+  }
+}
+
 export async function getUsageToday(userId: string): Promise<number> {
   const usage = (await readUsage()).users?.[userId];
   const today = new Date().toISOString().slice(0, 10);

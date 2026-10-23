@@ -37,14 +37,23 @@ async function fetchJson(url: string, init: RequestInit, timeoutMs: number) {
   }
 }
 
-async function fetchModels(provider: Provider, baseUrl: string, apiKey: string): Promise<string[]> {
+type ModelGroups = { free: string[]; paid: string[] };
+
+function isFreeModelId(id: string): boolean {
+  return /(^|[-_/])free($|[-_/])/i.test(id) || id.endsWith(":free");
+}
+
+async function fetchModels(provider: Provider, baseUrl: string, apiKey: string): Promise<ModelGroups> {
   const normalizedBase = baseUrl || DEFAULT_BASE_URLS[provider];
 
   if (provider === "ollama") {
     const root = normalizedBase.replace(/\/v1$/, "");
     const data = await fetchJson(`${root}/api/tags`, {}, 15000);
     const models = (data as { models?: { name?: unknown }[] }).models ?? [];
-    return models.map((model) => (typeof model.name === "string" ? model.name : "")).filter(Boolean);
+    return {
+      free: models.map((model) => (typeof model.name === "string" ? model.name : "")).filter(Boolean),
+      paid: [],
+    };
   }
 
   if (provider === "anthropic") {
@@ -55,15 +64,31 @@ async function fetchModels(provider: Provider, baseUrl: string, apiKey: string):
       },
     }, 15000);
     const models = (data as { data?: { id?: unknown }[] }).data ?? [];
-    return models.map((model) => (typeof model.id === "string" ? model.id : "")).filter(Boolean);
+    const ids = models.map((model) => (typeof model.id === "string" ? model.id : "")).filter(Boolean);
+    return {
+      free: ids.filter(isFreeModelId),
+      paid: ids.filter((id) => !isFreeModelId(id)),
+    };
   }
 
   const openAiBase = normalizedBase.endsWith("/v1") ? normalizedBase : `${normalizedBase}/v1`;
   const data = await fetchJson(`${openAiBase}/models`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   }, 15000);
-  const models = (data as { data?: { id?: unknown }[] }).data ?? [];
-  return models.map((model) => (typeof model.id === "string" ? model.id : "")).filter(Boolean);
+  const models = (data as { data?: { id?: unknown; pricing?: { prompt?: unknown; completion?: unknown } }[] }).data ?? [];
+
+  const free: string[] = [];
+  const paid: string[] = [];
+  for (const model of models) {
+    if (typeof model.id !== "string") continue;
+    const pricing = model.pricing;
+    const promptPrice = typeof pricing?.prompt === "string" ? Number(pricing.prompt) : 0;
+    const completionPrice = typeof pricing?.completion === "string" ? Number(pricing.completion) : 0;
+    const isFree = isFreeModelId(model.id) || (promptPrice === 0 && completionPrice === 0 && provider === "openrouter");
+    (isFree ? free : paid).push(model.id);
+  }
+
+  return { free, paid };
 }
 
 export async function POST(request: Request) {
@@ -78,22 +103,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Choose a supported provider." }, { status: 400 });
     }
 
+    const userId = await requireUserId();
     const baseUrl = normalizeUrl(body.baseUrl);
-    const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+    let apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+
+    if (!apiKey && provider !== "ollama" && body.useStoredKey === true) {
+      const { getStoredApiKey } = await import("@/lib/llm-settings");
+      apiKey = (await getStoredApiKey(userId)) ?? "";
+    }
 
     if (provider !== "ollama" && !apiKey) {
       return NextResponse.json({ error: "Paste an API key before loading models." }, { status: 400 });
     }
 
     const models = await fetchModels(provider, baseUrl, apiKey);
-    const uniqueModels = [...new Set(models)].sort((a, b) => a.localeCompare(b)).slice(0, 500);
+    const free = [...new Set(models.free)].sort((a, b) => a.localeCompare(b)).slice(0, 500);
+    const paid = [...new Set(models.paid)].sort((a, b) => a.localeCompare(b)).slice(0, 500);
 
-    if (uniqueModels.length === 0) {
+    if (free.length === 0 && paid.length === 0) {
       return NextResponse.json({ error: "No models were returned by that provider." }, { status: 404 });
     }
 
-    await requireUserId();
-    return NextResponse.json({ models: uniqueModels });
+    return NextResponse.json({ free, paid });
   } catch (error) {
     return apiError(error);
   }
