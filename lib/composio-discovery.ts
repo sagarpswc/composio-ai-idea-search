@@ -1469,6 +1469,3 @@ export async function findActionBySlug(slug: string): Promise<ActionCandidate | 
   };
 }
 
-export function summarizeToolkit(toolkit: DiscoveryToolkit): ToolkitSummary {
-  return toolkitSummary(toolkit);
-}
