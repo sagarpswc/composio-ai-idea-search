@@ -30,6 +30,8 @@ import { ConnectedApps } from "@/components/dashboard/connected-apps";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { ToolPlayground } from "@/components/dashboard/tool-playground";
 import { AiSettings } from "@/components/dashboard/ai-settings";
+import { useTheme } from "next-themes";
+import TopoField from "@/components/ui/topo-field";
 import { IdeaSearch } from "@/components/dashboard/idea-search";
 import type {
   CatalogResponse,
@@ -83,6 +85,7 @@ type DashboardUser = {
 
 export function Dashboard({ user }: { user: DashboardUser }) {
   const router = useRouter();
+  const { resolvedTheme } = useTheme();
   const [apps, setApps] = useState<DashboardApp[]>([]);
   const [connectedApps, setConnectedApps] = useState<DashboardApp[]>([]);
   const [query, setQuery] = useState("");
@@ -370,8 +373,12 @@ export function Dashboard({ user }: { user: DashboardUser }) {
     : "—";
 
   return (
-    <div className="flex min-h-svh flex-col bg-background">
-      <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
+    <div className="relative flex min-h-svh flex-col bg-transparent">
+      <div className="pointer-events-none fixed inset-0 z-0">
+        <TopoField mode={resolvedTheme === "light" ? "light" : "dark"} />
+      </div>
+      <div className="relative z-10 flex min-h-svh flex-col">
+        <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
         <div className="mx-auto flex h-16 w-full max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
           <Brand href="/dashboard" />
           <Separator
@@ -780,6 +787,7 @@ export function Dashboard({ user }: { user: DashboardUser }) {
           <span>Email/password demo auth · local JSON store</span>
         </div>
       </footer>
+      </div>
     </div>
   );
 }
