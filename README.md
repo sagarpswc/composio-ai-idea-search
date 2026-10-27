@@ -10,7 +10,8 @@ There is no hardcoded app list: the catalog, connection state, Connect Links, an
 
 - Register and sign in with email + password only.
 - Isolates every account with a stable Composio user ID.
-- Fetches the full toolkit catalog with pagination and search.
+- Fetches the full toolkit catalog with pagination, page controls, and search.
+- Paginates app detail actions with Previous/Next controls and a searchable action list.
 - Caches toolkit metadata, scopes, and action previews in `.data/composio-cache.json` to avoid repeated backend calls.
 - Searches the local Composio cache for AI idea workflows and returns ranked combinations with implementation steps only.
 - Generates a Composio **Connect Link** for any toolkit a user selects.

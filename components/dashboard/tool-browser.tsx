@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  ChevronDown,
-  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   CirclePlus,
   Pencil,
   Search,
@@ -74,7 +74,8 @@ export function ToolBrowser({
   total: number;
 }) {
   const [query, setQuery] = useState("");
-  const [expanded, setExpanded] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageSize = 12;
 
   const filtered = useMemo(() => {
     const value = query.trim().toLowerCase();
@@ -92,8 +93,17 @@ export function ToolBrowser({
     });
   }, [query, tools]);
 
-  const visible = expanded ? filtered : filtered.slice(0, 9);
-  const hasMore = filtered.length > 9;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const visible = filtered.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  );
+  const hasPagination = filtered.length > pageSize;
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, tools]);
 
   if (tools.length === 0) {
     return (
@@ -117,10 +127,7 @@ export function ToolBrowser({
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setExpanded(false);
-            }}
+            onChange={(event) => setQuery(event.target.value)}
             placeholder="Search actions, e.g. create, list, message…"
             autoComplete="off"
             className="h-9 pl-8"
@@ -189,29 +196,38 @@ export function ToolBrowser({
         </div>
       )}
 
-      {hasMore ? (
-        <div className="flex flex-col items-center gap-2 pt-1">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setExpanded((value) => !value)}
-          >
-            {expanded ? (
-              <ChevronUp className="size-3.5" />
-            ) : (
-              <ChevronDown className="size-3.5" />
-            )}
-            {expanded
-              ? "Show fewer actions"
-              : `Show all ${filtered.length} actions`}
-          </Button>
-          {expanded && total > tools.length ? (
-            <p className="text-center text-[11px] text-muted-foreground">
-              Showing {tools.length} highlighted actions from{" "}
-              {total.toLocaleString()} total Composio actions.
-            </p>
-          ) : null}
+      {hasPagination ? (
+        <div className="flex flex-col items-center gap-2 pt-1 sm:flex-row sm:justify-between">
+          <p className="text-center text-[11px] text-muted-foreground sm:text-left">
+            Showing {(currentPage - 1) * pageSize + 1}–
+            {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length} actions
+            {total > tools.length ? ` from ${total.toLocaleString()} total Composio actions` : ""}.
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={currentPage <= 1}
+              onClick={() => setPage((value) => Math.max(1, value - 1))}
+            >
+              <ChevronLeft className="size-3.5" />
+              Previous
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Page {currentPage} of {totalPages}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={currentPage >= totalPages}
+              onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+            >
+              Next
+              <ChevronRight className="size-3.5" />
+            </Button>
+          </div>
         </div>
       ) : null}
     </div>

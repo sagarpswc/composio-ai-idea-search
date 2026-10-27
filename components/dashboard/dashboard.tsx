@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -8,10 +8,11 @@ import {
   BrainCircuit,
   Boxes,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Settings,
   ExternalLink,
   LayoutGrid,
-  Loader2,
   LockKeyhole,
   LogOut,
   PlugZap,
@@ -89,9 +90,10 @@ export function Dashboard({ user }: { user: DashboardUser }) {
   const [cursor, setCursor] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const pageCursors = useRef<(string | null)[]>([null]);
   const [catalogTotal, setCatalogTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [paging, setPaging] = useState(false);
   const [connectionsLoading, setConnectionsLoading] = useState(true);
   const [catalogError, setCatalogError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -151,6 +153,7 @@ export function Dashboard({ user }: { user: DashboardUser }) {
       setApps([]);
       setCursor(null);
       setPage(1);
+      pageCursors.current = [null];
 
       try {
         const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
@@ -178,6 +181,7 @@ export function Dashboard({ user }: { user: DashboardUser }) {
           throw new Error(data.error || "Could not load the app catalog.");
         }
 
+        pageCursors.current = [null, data.nextCursor ?? null];
         setApps(data.items);
         setCursor(data.nextCursor);
         setTotalPages(data.totalPages);
@@ -248,18 +252,25 @@ export function Dashboard({ user }: { user: DashboardUser }) {
     };
   }, [refreshKey, router]);
 
-  async function loadMore() {
-    if (!cursor || loadingMore) {
+  async function goToPage(targetPage: number) {
+    if (targetPage < 1 || targetPage > totalPages || targetPage === page || paging) {
       return;
     }
 
-    setLoadingMore(true);
+    const targetCursor = targetPage === 1 ? null : pageCursors.current[targetPage - 1];
+
+    if (targetPage > 1 && !targetCursor) {
+      return;
+    }
+
+    setPaging(true);
 
     try {
-      const params = new URLSearchParams({
-        limit: String(PAGE_SIZE),
-        cursor,
-      });
+      const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+
+      if (targetCursor) {
+        params.set("cursor", targetCursor);
+      }
 
       if (debouncedQuery) {
         params.set("search", debouncedQuery);
@@ -280,25 +291,20 @@ export function Dashboard({ user }: { user: DashboardUser }) {
       }
 
       if (!response.ok) {
-        throw new Error(data.error || "Could not load more apps.");
+        throw new Error(data.error || "Could not load that page of apps.");
       }
 
-      setApps((current) => {
-        const seen = new Set(current.map((app) => app.slug));
-        return [
-          ...current,
-          ...data.items.filter((app) => !seen.has(app.slug)),
-        ];
-      });
+      pageCursors.current[targetPage] = data.nextCursor ?? null;
+      setApps(data.items);
       setCursor(data.nextCursor);
-      setPage((value) => value + 1);
+      setPage(targetPage);
       setTotalPages(data.totalPages);
     } catch (error) {
-      toast.error("Could not load more apps", {
+      toast.error("Could not load that page", {
         description: errorMessage(error, "Please try again."),
       });
     } finally {
-      setLoadingMore(false);
+      setPaging(false);
     }
   }
 
@@ -647,20 +653,36 @@ export function Dashboard({ user }: { user: DashboardUser }) {
                   </div>
                 )}
 
-                {cursor && !loading ? (
-                  <div className="flex justify-center pt-2">
-                    <Button
-                      variant="outline"
-                      onClick={() => void loadMore()}
-                      disabled={loadingMore}
-                    >
-                      {loadingMore ? (
-                        <Loader2 className="size-3.5 animate-spin" />
-                      ) : (
-                        <RefreshCw className="size-3.5" />
-                      )}
-                      {loadingMore ? "Loading…" : "Load more apps"}
-                    </Button>
+                {!loading && totalPages > 1 ? (
+                  <div className="flex flex-col items-center justify-between gap-3 border-t pt-4 sm:flex-row">
+                    <p className="text-xs text-muted-foreground">
+                      Showing page {page} of {totalPages} · {apps.length} apps
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={page <= 1 || paging}
+                        onClick={() => void goToPage(page - 1)}
+                      >
+                        <ChevronLeft className="size-3.5" />
+                        Previous
+                      </Button>
+                      <span className="min-w-20 text-center text-xs text-muted-foreground">
+                        {paging ? "Loading…" : `Page ${page}`}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={!cursor || paging || page >= totalPages}
+                        onClick={() => void goToPage(page + 1)}
+                      >
+                        Next
+                        <ChevronRight className="size-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 ) : null}
               </TabsContent>

@@ -1,6 +1,6 @@
 {
   "name": "composio-ai-idea-search",
-  "version": "1.0.0",
+  "version": "1.6.0",
   "description": "Multi-user Next.js app for exploring Composio toolkits, scopes, and actions with a local AI idea search.",
   "engines": {
     "node": ">=20"
