@@ -6,7 +6,7 @@ const DATA_DIR = path.join(process.cwd(), ".data");
 const SETTINGS_FILE = path.join(DATA_DIR, "llm-settings.json");
 const USAGE_FILE = path.join(DATA_DIR, "llm-usage.json");
 
-export type LlmProvider = "openai" | "openrouter" | "anthropic" | "xai" | "ollama" | "custom";
+export type LlmProvider = "openai" | "openrouter" | "anthropic" | "xai" | "custom";
 
 export type StoredLlmSettings = {
   provider: LlmProvider;
@@ -35,14 +35,13 @@ export type ResolvedLlmConfig = {
   dailyLimit: number;
 };
 
-const PROVIDERS: LlmProvider[] = ["openai", "openrouter", "anthropic", "xai", "ollama", "custom"];
+const PROVIDERS: LlmProvider[] = ["openai", "openrouter", "anthropic", "xai", "custom"];
 
 const DEFAULT_BASE_URLS: Record<LlmProvider, string> = {
   openai: "https://api.openai.com/v1",
   openrouter: "https://openrouter.ai/api/v1",
   anthropic: "https://api.anthropic.com/v1",
   xai: "https://api.x.ai/v1",
-  ollama: "http://127.0.0.1:11434",
   custom: "",
 };
 
@@ -108,16 +107,45 @@ function decrypt(value: string): string {
 
 type SettingsFile = Record<string, StoredLlmSettings>;
 
+function normalizeProvider(value: unknown): LlmProvider {
+  if (value === "ollama") return "openai";
+  return isProvider(value) ? value : "openai";
+}
+
 async function readSettings(): Promise<SettingsFile> {
   const parsed = await readJson<unknown>(SETTINGS_FILE, {});
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-  return parsed as SettingsFile;
+
+  const normalized: SettingsFile = {};
+  for (const [userId, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const stored = value as Partial<StoredLlmSettings>;
+    const provider = normalizeProvider(stored.provider);
+    normalized[userId] = {
+      provider,
+      model: typeof stored.model === "string" ? stored.model : "",
+      baseUrl:
+        provider === "openai"
+          ? stored.baseUrl?.trim() || ""
+          : typeof stored.baseUrl === "string"
+            ? stored.baseUrl
+            : "",
+      encryptedApiKey:
+        typeof stored.encryptedApiKey === "string" || stored.encryptedApiKey === null
+          ? stored.encryptedApiKey
+          : null,
+      useShared: stored.useShared === true,
+      updatedAt: typeof stored.updatedAt === "string" ? stored.updatedAt : new Date(0).toISOString(),
+    };
+  }
+
+  return normalized;
 }
 
 export async function getPublicLlmSettings(userId: string): Promise<PublicLlmSettings> {
   const settings = (await readSettings())[userId];
   return {
-    provider: settings?.provider ?? "ollama",
+    provider: settings?.provider ?? "openai",
     model: settings?.model ?? "",
     baseUrl: settings?.baseUrl ?? "",
     hasApiKey: Boolean(settings?.encryptedApiKey),
@@ -144,7 +172,7 @@ export async function saveLlmSettings(
   const baseUrl = normalizeUrl(input.baseUrl);
   if (!validateUrl(baseUrl)) throw new Error("Enter a valid base URL.");
 
-  const useShared = input.useShared === true;
+  const requestedUseShared = input.useShared === true;
   const clearApiKey = input.clearApiKey === true;
   const apiKey = typeof input.apiKey === "string" ? input.apiKey.trim() : "";
 
@@ -159,11 +187,16 @@ export async function saveLlmSettings(
     encryptedApiKey = encrypt(apiKey);
   }
 
+  const useShared = apiKey ? false : requestedUseShared;
+  if (useShared) {
+    encryptedApiKey = null;
+  }
+
   const stored: StoredLlmSettings = {
     provider: input.provider,
     model,
     baseUrl,
-    encryptedApiKey: useShared ? null : encryptedApiKey,
+    encryptedApiKey,
     useShared,
     updatedAt: new Date().toISOString(),
   };
@@ -189,7 +222,7 @@ export function sharedConfig(): ResolvedLlmConfig | null {
   const dailyLimit = Number(process.env.SHARED_LLM_DAILY_LIMIT ?? 20);
 
   if (provider && isProvider(provider) && model) {
-    if (provider === "ollama" || apiKey) {
+    if (apiKey || provider === "custom") {
       return {
         provider,
         model,
@@ -199,20 +232,6 @@ export function sharedConfig(): ResolvedLlmConfig | null {
         dailyLimit: Number.isFinite(dailyLimit) && dailyLimit > 0 ? Math.trunc(dailyLimit) : 20,
       };
     }
-  }
-
-  // Backward-compatible local model configuration.
-  const localUrl = process.env.LOCAL_LLM_URL?.trim();
-  const localModel = process.env.LOCAL_LLM_MODEL?.trim();
-  if (localUrl && localModel) {
-    return {
-      provider: "ollama",
-      model: localModel,
-      baseUrl: localUrl.replace(/\/+$/, ""),
-      apiKey: "",
-      source: "local",
-      dailyLimit: 0,
-    };
   }
 
   return null;
@@ -348,31 +367,6 @@ async function callAnthropic(
   return typeof text === "string" ? text : null;
 }
 
-async function callOllama(
-  config: ResolvedLlmConfig,
-  prompt: string,
-  options: LlmCallOptions = {}
-): Promise<string | null> {
-  const baseUrl = config.baseUrl || DEFAULT_BASE_URLS.ollama;
-  const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    signal: options.signal,
-    body: JSON.stringify({
-      model: config.model,
-      prompt,
-      stream: false,
-      options: {
-        temperature: options.temperature ?? 0,
-        num_predict: options.maxTokens ?? 180,
-      },
-    }),
-  });
-
-  if (!response.ok) return null;
-  const data = (await response.json()) as { response?: unknown };
-  return typeof data.response === "string" ? data.response : null;
-}
 
 export async function generateLlmText(
   userId: string,
@@ -397,9 +391,7 @@ export async function generateLlmText(
     const text =
       config.provider === "anthropic"
         ? await callAnthropic(config, prompt, callOptions)
-        : config.provider === "ollama"
-          ? await callOllama(config, prompt, callOptions)
-          : await callOpenAiCompatible(config, prompt, callOptions);
+        : await callOpenAiCompatible(config, prompt, callOptions);
 
     if (!text?.trim()) return null;
 
@@ -464,8 +456,6 @@ export async function generateLlmSteps(
 
     if (config.provider === "anthropic") {
       text = await callAnthropic(config, prompt);
-    } else if (config.provider === "ollama") {
-      text = await callOllama(config, prompt);
     } else {
       text = await callOpenAiCompatible(config, prompt);
     }
@@ -497,7 +487,6 @@ export async function testLlmConfig(userId: string): Promise<{ ok: boolean; prov
 
   try {
     if (config.provider === "anthropic") text = await callAnthropic(config, prompt);
-    else if (config.provider === "ollama") text = await callOllama(config, prompt);
     else text = await callOpenAiCompatible(config, prompt);
 
     return { ok: Boolean(text), provider: config.provider, model: config.model, preview: text };

@@ -1,41 +1,11 @@
 services:
-  ollama:
-    image: ollama/ollama:latest
-    volumes:
-      - ollama:/root/.ollama
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
-  ollama-pull:
-    image: ollama/ollama:latest
-    depends_on:
-      ollama:
-        condition: service_healthy
-    volumes:
-      - ollama:/root/.ollama
-    entrypoint: ["/bin/sh", "-c", "ollama pull qwen2.5:0.5b"]
-    restart: "no"
-
   app:
     build: .
-    depends_on:
-      ollama:
-        condition: service_healthy
-      ollama-pull:
-        condition: service_completed_successfully
     env_file: .env
-    environment:
-      LOCAL_LLM_URL: http://ollama:11434
-      LOCAL_LLM_MODEL: qwen2.5:0.5b
-      LOCAL_LLM_TIMEOUT_MS: 60000
     ports:
       - "3000:3000"
     volumes:
       - ./.data:/app/.data
     command: ["sh", "-c", "npm run preload:force && npm run start"]
 
-volumes:
-  ollama:
+volumes: {}

@@ -37,7 +37,7 @@ npm run setup
 npm run dev
 ```
 
-`npm run setup` installs dependencies, generates `AUTH_SECRET`, installs and starts Ollama, pulls the small local model (`qwen2.5:0.5b`), bulk-feeds the Composio cache, and builds the app. After setup, only `COMPOSIO_API_KEY` needs to be provided by you.
+`npm run setup` installs dependencies, generates `AUTH_SECRET`, bulk-feeds the Composio cache, and builds the app. After setup, configure your AI provider in the dashboard or set shared AI environment variables.
 
 Manual setup is also supported:
 
@@ -57,8 +57,6 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 - Get the Composio **project** key from Dashboard → Settings → Project Settings → API Keys. Do not use a `uak_...` user key for this backend.
 - Generate `AUTH_SECRET` with `openssl rand -hex 32`.
 - `NEXT_PUBLIC_APP_URL` is optional locally, but required behind a proxy or tunnel so OAuth callbacks return to the right origin.
-- Optional local-model settings are already included in `.env.example`.
-
 Start the app:
 
 ```bash
@@ -205,20 +203,11 @@ Supported providers:
 - OpenRouter
 - Anthropic (Claude)
 - xAI (Grok)
-- Ollama
 - Custom OpenAI-compatible endpoint
 
 Users can also enter their own API key in the dashboard **AI settings** tab. Personal keys are encrypted on the server and are never returned to the browser. When no personal key is configured, the app uses shared platform access subject to the daily limit.
 
-Backward-compatible local model configuration:
-
-```bash
-LOCAL_LLM_URL=http://127.0.0.1:11434
-LOCAL_LLM_MODEL=qwen2.5:0.5b
-LOCAL_LLM_TIMEOUT_MS=60000
-```
-
-When configured, the idea-search endpoint can send retrieved candidates to the configured model and return AI-refined steps. If no model is available, the deterministic search result is still returned.
+AI settings are configured in the dashboard. Shared platform access is optional and controlled by `SHARED_LLM_*` environment variables. Personal API keys are encrypted on the server and are never returned to the browser.
 
 ## Docker
 
@@ -230,7 +219,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-The Compose file starts Ollama, pulls `qwen2.5:0.5b`, bulk-feeds the local cache, and starts the Next.js app. The app is available at `http://localhost:3000`.
+The Compose file bulk-feeds the local cache and starts the Next.js app. The app is available at `http://localhost:3000`.
 
 Health check:
 

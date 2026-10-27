@@ -12,7 +12,6 @@ Composio AI Idea Search helps developers and teams discover the smallest safe se
 - Local Composio cache for apps, scopes, and actions
 - Weekly Saturday cache refresh
 - AI idea search with ranked combinations and steps only
-- Optional local-model refinement through Ollama
 - Docker Compose and one-command setup
 
 ## B2B-focused next steps

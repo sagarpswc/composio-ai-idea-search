@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
-type Provider = "openai" | "openrouter" | "anthropic" | "xai" | "ollama" | "custom";
+type Provider = "openai" | "openrouter" | "anthropic" | "xai" | "custom";
 
 type SettingsResponse = {
   settings: {
@@ -42,7 +42,6 @@ const PROVIDERS: { value: Provider; label: string }[] = [
   { value: "openrouter", label: "OpenRouter" },
   { value: "anthropic", label: "Anthropic (Claude)" },
   { value: "xai", label: "xAI (Grok)" },
-  { value: "ollama", label: "Ollama (local)" },
   { value: "custom", label: "Custom OpenAI-compatible" },
 ];
 
@@ -53,7 +52,7 @@ export function AiSettings() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [shared, setShared] = useState<SettingsResponse["shared"] | null>(null);
-  const [provider, setProvider] = useState<Provider>("ollama");
+  const [provider, setProvider] = useState<Provider>("openai");
   const [model, setModel] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -100,7 +99,6 @@ export function AiSettings() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const canLoad =
-        provider === "ollama" ||
         apiKey.trim().length >= 20 ||
         hasApiKey;
       if (canLoad) {
@@ -149,7 +147,7 @@ export function AiSettings() {
     setModelError("");
     setTestResult(null);
 
-    if (provider !== "ollama" && !apiKey.trim()) {
+    if (!apiKey.trim() && !hasApiKey) {
       setModelError("Paste an API key before loading models.");
       return;
     }
@@ -196,11 +194,13 @@ export function AiSettings() {
       const response = await fetch("/api/llm-test", { method: "POST" });
       const data = (await response.json()) as { ok?: boolean; preview?: string | null; error?: string };
       if (!response.ok) throw new Error(data.error || "Could not test AI settings.");
-      setTestResult({ ok: Boolean(data.ok), preview: data.preview ?? null });
-      if (data.ok) setMessage("Connection test succeeded.");
-      else setError("Connection test failed.");
+      if (data.ok) {
+        setTestResult({ ok: true, preview: data.preview ?? null });
+      } else {
+        setTestResult({ ok: false, preview: data.preview ?? "Connection test failed." });
+      }
     } catch (testError) {
-      setError(testError instanceof Error ? testError.message : "Could not test AI settings.");
+      setTestResult({ ok: false, preview: testError instanceof Error ? testError.message : "Could not test AI settings." });
     } finally {
       setTesting(false);
     }
@@ -340,7 +340,10 @@ export function AiSettings() {
               id="ai-api-key"
               type="password"
               value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
+              onChange={(event) => {
+                setApiKey(event.target.value);
+                if (event.target.value.trim()) setUseShared(false);
+              }}
               placeholder={hasApiKey ? "Stored securely. Enter a new key to replace it." : "Enter a provider API key"}
               autoComplete="off"
               className="h-9"

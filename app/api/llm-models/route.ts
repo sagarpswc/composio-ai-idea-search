@@ -4,19 +4,18 @@ import { requireUserId } from "@/lib/identity";
 
 export const runtime = "nodejs";
 
-type Provider = "openai" | "openrouter" | "anthropic" | "xai" | "ollama" | "custom";
+type Provider = "openai" | "openrouter" | "anthropic" | "xai" | "custom";
 
 const DEFAULT_BASE_URLS: Record<Provider, string> = {
   openai: "https://api.openai.com/v1",
   openrouter: "https://openrouter.ai/api/v1",
   anthropic: "https://api.anthropic.com/v1",
   xai: "https://api.x.ai/v1",
-  ollama: "http://127.0.0.1:11434",
   custom: "",
 };
 
 function isProvider(value: unknown): value is Provider {
-  return typeof value === "string" && ["openai", "openrouter", "anthropic", "xai", "ollama", "custom"].includes(value);
+  return typeof value === "string" && ["openai", "openrouter", "anthropic", "xai", "custom"].includes(value);
 }
 
 function normalizeUrl(value: unknown): string {
@@ -45,16 +44,6 @@ function isFreeModelId(id: string): boolean {
 
 async function fetchModels(provider: Provider, baseUrl: string, apiKey: string): Promise<ModelGroups> {
   const normalizedBase = baseUrl || DEFAULT_BASE_URLS[provider];
-
-  if (provider === "ollama") {
-    const root = normalizedBase.replace(/\/v1$/, "");
-    const data = await fetchJson(`${root}/api/tags`, {}, 15000);
-    const models = (data as { models?: { name?: unknown }[] }).models ?? [];
-    return {
-      free: models.map((model) => (typeof model.name === "string" ? model.name : "")).filter(Boolean),
-      paid: [],
-    };
-  }
 
   if (provider === "anthropic") {
     const data = await fetchJson(`${normalizedBase}/models`, {
@@ -107,12 +96,12 @@ export async function POST(request: Request) {
     const baseUrl = normalizeUrl(body.baseUrl);
     let apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
 
-    if (!apiKey && provider !== "ollama" && body.useStoredKey === true) {
+    if (!apiKey && body.useStoredKey === true) {
       const { getStoredApiKey } = await import("@/lib/llm-settings");
       apiKey = (await getStoredApiKey(userId)) ?? "";
     }
 
-    if (provider !== "ollama" && !apiKey) {
+    if (!apiKey) {
       return NextResponse.json({ error: "Paste an API key before loading models." }, { status: 400 });
     }
 
