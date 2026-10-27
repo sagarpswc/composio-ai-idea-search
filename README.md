@@ -13,7 +13,8 @@ There is no hardcoded app list: the catalog, connection state, Connect Links, an
 - Fetches the full toolkit catalog with pagination, page controls, and search.
 - Paginates app detail actions with Previous/Next controls and a searchable action list.
 - Caches toolkit metadata, scopes, and action previews in `.data/composio-cache.json` to avoid repeated backend calls.
-- Searches the local Composio cache for AI idea workflows and returns ranked combinations with implementation steps only.
+- Searches the local Composio cache for AI idea workflows and returns one best workflow plan plus alternatives, with implementation steps only and no code.
+- Builds a tool call from a natural-language prompt in the playground, including the tool slug, JSON arguments, required fields, and a professional connection-required state when the app is not connected.
 - Generates a Composio **Connect Link** for any toolkit a user selects.
 - Shows connected apps and lets users disconnect them.
 - Executes any tool through the same account-scoped session.

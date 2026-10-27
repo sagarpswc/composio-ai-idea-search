@@ -35,6 +35,7 @@ import type {
   CatalogResponse,
   ConnectionsResponse,
   DashboardApp,
+  PlaygroundSeed,
 } from "@/components/dashboard/types";
 import {
   errorMessage,
@@ -97,6 +98,20 @@ export function Dashboard({ user }: { user: DashboardUser }) {
   const [connectionsLoading, setConnectionsLoading] = useState(true);
   const [catalogError, setCatalogError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [activeTab, setActiveTab] = useState("catalog");
+  const [playgroundSeed, setPlaygroundSeed] = useState<PlaygroundSeed | null>(null);
+
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (
+      requested === "catalog" ||
+      requested === "playground" ||
+      requested === "ideas" ||
+      requested === "ai-settings"
+    ) {
+      setActiveTab(requested);
+    }
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -337,6 +352,18 @@ export function Dashboard({ user }: { user: DashboardUser }) {
     setRefreshKey((value) => value + 1);
   }
 
+  function changeTab(value: string) {
+    setActiveTab(value);
+
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", value);
+      window.history.replaceState({}, "", url);
+    } catch {
+      // The tab still changes when history updates are unavailable.
+    }
+  }
+
   const refreshing = loading || connectionsLoading;
   const estimatedApps = catalogTotal
     ? `~${catalogTotal.toLocaleString()}`
@@ -525,7 +552,7 @@ export function Dashboard({ user }: { user: DashboardUser }) {
           className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]"
         >
           <div className="min-w-0">
-            <Tabs defaultValue="catalog">
+            <Tabs value={activeTab} onValueChange={changeTab}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <TabsList className="h-9">
                   <TabsTrigger value="catalog">
@@ -688,11 +715,16 @@ export function Dashboard({ user }: { user: DashboardUser }) {
               </TabsContent>
 
               <TabsContent value="playground" className="mt-4">
-                <ToolPlayground />
+                <ToolPlayground initialSetup={playgroundSeed} />
               </TabsContent>
 
               <TabsContent value="ideas" className="mt-4">
-                <IdeaSearch />
+                <IdeaSearch
+                  onOpenPlayground={(seed) => {
+                    setPlaygroundSeed(seed);
+                    changeTab("playground");
+                  }}
+                />
               </TabsContent>
 
               <TabsContent value="ai-settings" className="mt-4">

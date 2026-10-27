@@ -1,311 +1,481 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { generateLlmSteps } from "@/lib/llm-settings";
-
-const CACHE_FILE = path.join(process.cwd(), ".data", "composio-cache.json");
+import {
+  rankActionsForPrompt,
+  type ActionCandidate,
+  type MentionRole,
+  type PromptAnalysis,
+} from "@/lib/composio-discovery";
 
 export type IdeaAction = {
   slug: string;
   name: string;
+  description: string;
+  kind: "read" | "create" | "update" | "delete" | "action";
   score: number;
+  matchedTerms: string[];
+  reason: string;
 };
 
 export type IdeaApp = {
   slug: string;
   name: string;
-  score: number;
-  scopeCount: number;
-  scopes: string[];
-  actions: IdeaAction[];
-};
-
-export type IdeaResearch = {
-  slug: string;
-  name: string;
-  score: number;
-  matchedTerms: string[];
-  matchedFields: string[];
-  scopeCount: number;
+  logo: string | null;
+  description: string;
   categories: string[];
   scopes: string[];
+  scopeCount: number;
+  isNoAuth: boolean;
   toolsCount: number;
-  actions: IdeaAction[];
-  reason: string;
+  role: MentionRole;
+  action: IdeaAction;
 };
 
-export type IdeaCombination = {
+export type IdeaStep = {
+  order: number;
+  appSlug: string;
+  appName: string;
+  actionSlug: string;
+  actionName: string;
+  instruction: string;
+  description: string;
+  matchedTerms: string[];
+};
+
+export type IdeaPlan = {
+  id: string;
   rank: number;
+  title: string;
+  summary: string;
+  why: string;
+  confidence: "high" | "medium" | "low";
   score: number;
   totalScopes: number;
   apps: IdeaApp[];
-  steps: string[];
+  steps: IdeaStep[];
+  unmatchedTerms: string[];
 };
 
-const STOP_WORDS = new Set(["and", "the", "for", "with", "from", "into", "using", "then", "that", "this"]);
+export type IdeaSearchResult = {
+  requirement: string;
+  interpretation: {
+    apps: string[];
+    intents: string[];
+    objects: string[];
+    clauses: string[];
+  };
+  best: IdeaPlan | null;
+  alternatives: IdeaPlan[];
+  note: string;
+};
 
-function tokenize(value: string): string[] {
-  return value
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 2 && !STOP_WORDS.has(token));
+const DISPLAY_INTENT_WORDS = new Set([
+  "add",
+  "alert",
+  "archive",
+  "assign",
+  "check",
+  "close",
+  "copy",
+  "create",
+  "delete",
+  "download",
+  "edit",
+  "email",
+  "export",
+  "fetch",
+  "file",
+  "find",
+  "generate",
+  "get",
+  "insert",
+  "invite",
+  "label",
+  "list",
+  "load",
+  "make",
+  "mark",
+  "meeting",
+  "message",
+  "modify",
+  "move",
+  "new",
+  "notify",
+  "open",
+  "post",
+  "publish",
+  "read",
+  "remove",
+  "rename",
+  "reply",
+  "retrieve",
+  "revoke",
+  "save",
+  "schedule",
+  "search",
+  "send",
+  "set",
+  "share",
+  "show",
+  "trash",
+  "update",
+  "upload",
+  "view",
+  "write",
+]);
+
+function trimDescription(value: string, maxLength = 220): string {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
-function collectScopes(authConfigDetails: unknown): string[] {
-  const scopes = new Set<string>();
+function lowerFirst(value: string): string {
+  if (!value) {
+    return value;
+  }
 
-  if (!Array.isArray(authConfigDetails)) return [];
+  return `${value.charAt(0).toLowerCase()}${value.slice(1)}`;
+}
 
-  for (const config of authConfigDetails) {
-    if (!config || typeof config !== "object") continue;
-    const required = (config as { requiredScopes?: unknown }).requiredScopes;
-    if (Array.isArray(required)) {
-      for (const scope of required) {
-        if (typeof scope === "string" && scope.trim()) scopes.add(scope.trim());
-      }
+function appRoleLabel(role: MentionRole): string {
+  if (role === "source") {
+    return "trigger";
+  }
+
+  if (role === "destination") {
+    return "destination";
+  }
+
+  return "primary";
+}
+
+function planTitle(candidates: ActionCandidate[]): string {
+  const parts = candidates.map(
+    (candidate) => `${candidate.action.name} in ${candidate.toolkit.name}`
+  );
+
+  if (parts.length === 0) {
+    return "Workflow plan";
+  }
+
+  if (parts.length === 1) {
+    return parts[0];
+  }
+
+  return parts
+    .map((part, index) => (index === 0 ? part : lowerFirst(part)))
+    .join(", then ");
+}
+
+function planSummary(candidates: ActionCandidate[], title: string): string {
+  if (candidates.length === 1) {
+    const [candidate] = candidates;
+    return `${title}. ${candidate.toolkit.name} is the best match for this request, and “${candidate.action.name}” is the strongest action for this step.`;
+  }
+
+  const uses = candidates
+    .map((candidate) => `${candidate.toolkit.name} for “${candidate.action.name}”`)
+    .join(" and ");
+
+  return `${title}. This ${candidates.length}-app workflow uses ${uses}. Each selected action covers a different part of the request, so the plan stays focused instead of adding unnecessary tools.`;
+}
+
+function planWhy(candidates: ActionCandidate[]): string {
+  return candidates
+    .map((candidate) => {
+      const role = appRoleLabel(candidate.role);
+      return `${candidate.toolkit.name} (${role}): ${candidate.reason}`;
+    })
+    .join(" ");
+}
+
+function planConfidence(candidates: ActionCandidate[]): "high" | "medium" | "low" {
+  const scores = candidates.map((candidate) =>
+    Math.max(0, candidate.score - (candidate.explicit ? 40 : 0))
+  );
+  const minimum = scores.length > 0 ? Math.min(...scores) : 0;
+
+  if (minimum >= 25) {
+    return "high";
+  }
+
+  if (minimum >= 10) {
+    return "medium";
+  }
+
+  return "low";
+}
+
+function stepInstruction(candidate: ActionCandidate): string {
+  const description = trimDescription(candidate.action.description);
+
+  if (candidate.role === "source") {
+    return description
+      ? `Read the trigger from ${candidate.toolkit.name} with “${candidate.action.name}”. ${description}`
+      : `Read the trigger from ${candidate.toolkit.name} with “${candidate.action.name}”.`;
+  }
+
+  if (candidate.role === "destination") {
+    return description
+      ? `Send the result to ${candidate.toolkit.name} with “${candidate.action.name}”. ${description}`
+      : `Send the result to ${candidate.toolkit.name} with “${candidate.action.name}”.`;
+  }
+
+  return description
+    ? `Use “${candidate.action.name}” in ${candidate.toolkit.name}. ${description}`
+    : `Use “${candidate.action.name}” in ${candidate.toolkit.name}.`;
+}
+
+function buildPlan(
+  candidates: ActionCandidate[],
+  analysis: PromptAnalysis
+): IdeaPlan {
+  const ordered = [...candidates].sort((a, b) => {
+    const roleRank: Record<MentionRole, number> = {
+      source: 0,
+      primary: 1,
+      destination: 2,
+    };
+    const role = roleRank[a.role] - roleRank[b.role];
+    if (role !== 0) {
+      return role;
     }
 
-    const fields = (config as { fields?: { authConfigCreation?: { optional?: unknown[]; required?: unknown[] } } }).fields;
-    for (const group of [fields?.authConfigCreation?.optional, fields?.authConfigCreation?.required]) {
-      if (!Array.isArray(group)) continue;
-      for (const field of group) {
-        if (!field || typeof field !== "object") continue;
-        const name = (field as { name?: unknown }).name;
-        const defaultValue = (field as { default?: unknown }).default;
-        if (typeof name === "string" && name.toLowerCase().includes("scope") && typeof defaultValue === "string") {
-          for (const scope of defaultValue.split(/[,\s]+/)) {
-            if (scope.trim()) scopes.add(scope.trim());
-          }
+    const clause = a.clauseIndex - b.clauseIndex;
+    return clause || a.toolkit.name.localeCompare(b.toolkit.name);
+  });
+
+  const title = planTitle(ordered);
+  const totalScopes = ordered.reduce(
+    (sum, candidate) => sum + candidate.toolkit.scopeCount,
+    0
+  );
+  const score =
+    ordered.reduce((sum, candidate) => sum + candidate.score, 0) +
+    ordered.length * 12 -
+    totalScopes * 0.01;
+
+  const apps: IdeaApp[] = ordered.map((candidate) => ({
+    slug: candidate.toolkit.slug,
+    name: candidate.toolkit.name,
+    logo: candidate.toolkit.logo,
+    description: candidate.toolkit.description,
+    categories: candidate.toolkit.categories,
+    scopes: candidate.toolkit.scopes,
+    scopeCount: candidate.toolkit.scopeCount,
+    isNoAuth: candidate.toolkit.isNoAuth,
+    toolsCount: candidate.toolkit.toolsCount,
+    role: candidate.role,
+    action: {
+      slug: candidate.action.slug,
+      name: candidate.action.name,
+      description: candidate.action.description,
+      kind: candidate.action.kind,
+      score: candidate.score,
+      matchedTerms: candidate.matchedTerms,
+      reason: candidate.reason,
+    },
+  }));
+
+  const steps: IdeaStep[] = ordered.map((candidate, index) => ({
+    order: index + 1,
+    appSlug: candidate.toolkit.slug,
+    appName: candidate.toolkit.name,
+    actionSlug: candidate.action.slug,
+    actionName: candidate.action.name,
+    instruction: stepInstruction(candidate),
+    description: trimDescription(candidate.action.description, 320),
+    matchedTerms: candidate.matchedTerms,
+  }));
+
+  const planText = ordered
+    .map(
+      (candidate) =>
+        `${candidate.toolkit.name} ${candidate.action.name} ${candidate.action.description}`
+    )
+    .join(" ")
+    .toLowerCase();
+  const unmatchedTerms = analysis.objectWords
+    .filter((word) => word.length > 3)
+    .filter((word) => !DISPLAY_INTENT_WORDS.has(word))
+    .filter((word) => !planText.includes(word))
+    .slice(0, 4);
+
+  return {
+    id: ordered.map((candidate) => candidate.action.slug).join("+"),
+    rank: 0,
+    title,
+    summary: planSummary(ordered, title),
+    why: planWhy(ordered),
+    confidence: planConfidence(ordered),
+    score: Math.round(score * 100) / 100,
+    totalScopes,
+    apps,
+    steps,
+    unmatchedTerms,
+  };
+}
+
+function planSignature(plan: IdeaPlan): string {
+  return plan.apps
+    .map((app) => `${app.slug}:${app.action.name.toLowerCase().replace(/[^a-z0-9]+/g, "")}`)
+    .join("|");
+}
+
+function groupCandidates(candidates: ActionCandidate[]): Map<string, ActionCandidate[]> {
+  const grouped = new Map<string, ActionCandidate[]>();
+
+  for (const candidate of candidates) {
+    const list = grouped.get(candidate.toolkit.slug) ?? [];
+    list.push(candidate);
+    grouped.set(candidate.toolkit.slug, list);
+  }
+
+  for (const list of grouped.values()) {
+    list.sort(
+      (a, b) =>
+        b.score - a.score ||
+        a.clauseIndex - b.clauseIndex ||
+        a.action.name.localeCompare(b.action.name)
+    );
+  }
+
+  return grouped;
+}
+
+export async function searchComposioIdeas(
+  requirement: string,
+  limit = 8
+): Promise<IdeaSearchResult> {
+  const prompt = requirement.trim();
+
+  if (!prompt) {
+    return {
+      requirement,
+      interpretation: { apps: [], intents: [], objects: [], clauses: [] },
+      best: null,
+      alternatives: [],
+      note: "Describe the outcome you want. Add app names when you already know which tools should be involved.",
+    };
+  }
+
+  const { analysis, candidates } = await rankActionsForPrompt(prompt, 36);
+
+  if (candidates.length === 0) {
+    return {
+      requirement: prompt,
+      interpretation: {
+        apps: analysis.mentions.map((mention) => mention.name),
+        intents: analysis.intents,
+        objects: analysis.objectWords
+          .filter((word) => !DISPLAY_INTENT_WORDS.has(word))
+          .slice(0, 6),
+        clauses: analysis.clauses.map((clause) => clause.text),
+      },
+      best: null,
+      alternatives: [],
+      note: "No strong action match was found. Try naming the app you want to use, or describe the trigger and the result separately.",
+    };
+  }
+
+  const grouped = groupCandidates(candidates);
+  const mentionSlugs = [...new Set(analysis.mentions.map((mention) => mention.slug))];
+  const plans: IdeaPlan[] = [];
+  const seen = new Set<string>();
+  const seenSignatures = new Set<string>();
+
+  const addPlan = (plan: IdeaPlan) => {
+    if (seen.has(plan.id)) {
+      return;
+    }
+
+    const signature = planSignature(plan);
+    if (seenSignatures.has(signature)) {
+      return;
+    }
+
+    seen.add(plan.id);
+    seenSignatures.add(signature);
+    plans.push(plan);
+  };
+
+  if (mentionSlugs.length > 0) {
+    const primaryCandidates = mentionSlugs
+      .map((slug) => grouped.get(slug)?.[0])
+      .filter((candidate): candidate is ActionCandidate => Boolean(candidate));
+
+    if (primaryCandidates.length > 0) {
+      addPlan(buildPlan(primaryCandidates, analysis));
+
+      for (let index = 0; index < primaryCandidates.length; index += 1) {
+        const alternatives = grouped.get(primaryCandidates[index].toolkit.slug) ?? [];
+
+        for (const alternative of alternatives.slice(1, 3)) {
+          const swapped = [...primaryCandidates];
+          swapped[index] = alternative;
+          addPlan(buildPlan(swapped, analysis));
         }
       }
     }
-  }
+  } else {
+    const seenToolkits = new Set<string>();
 
-  return [...scopes];
-}
-
-function combinations<T>(items: T[], size: number): T[][] {
-  if (size === 0) return [[]];
-  if (items.length < size) return [];
-  const result: T[][] = [];
-  for (let index = 0; index <= items.length - size; index += 1) {
-    const rest = combinations(items.slice(index + 1), size - 1);
-    for (const item of rest) {
-      result.push([items[index], ...item]);
-    }
-  }
-  return result;
-}
-
-export async function searchComposioIdeas(requirement: string, limit = 8): Promise<{
-  requirement: string;
-  combinations: IdeaCombination[];
-  candidates: IdeaApp[];
-  research: IdeaResearch[];
-}> {
-  const tokens = tokenize(requirement);
-  if (tokens.length === 0) {
-    return { requirement, combinations: [], candidates: [], research: [] };
-  }
-
-  let cache: { toolkits?: Record<string, { value?: any }>; tools?: Record<string, { value?: any[] }> } = {};
-  try {
-    cache = JSON.parse(await readFile(CACHE_FILE, "utf8"));
-  } catch {
-    return { requirement, combinations: [], candidates: [], research: [] };
-  }
-
-  const candidates: IdeaApp[] = [];
-  const research: IdeaResearch[] = [];
-
-  for (const [slug, entry] of Object.entries(cache.toolkits ?? {})) {
-    const toolkit = entry?.value;
-    if (!toolkit) continue;
-
-    const scopes = collectScopes(toolkit.authConfigDetails);
-    const actions = cache.tools?.[slug]?.value ?? [];
-    const actionMatches = actions
-      .map((action) => {
-        const text = `${action.name ?? ""} ${action.description ?? ""} ${action.slug ?? ""}`.toLowerCase();
-        const score = tokens.reduce((sum, token) => sum + (text.includes(token) ? 1 : 0), 0);
-        return { slug: action.slug, name: action.name, score };
-      })
-      .filter((action) => action.score > 0)
-      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
-      .slice(0, 4);
-
-    const toolkitText = [
-      toolkit.name,
-      toolkit.description,
-      ...(toolkit.categories ?? []),
-      ...scopes,
-      ...actions.map((action) => `${action.name} ${action.description}`),
-    ]
-      .join(" ")
-      .toLowerCase();
-
-    const fieldMatches = {
-      name: tokens.filter((token) => toolkit.name.toLowerCase().includes(token)),
-      description: tokens.filter((token) => (toolkit.description ?? "").toLowerCase().includes(token)),
-      categories: tokens.filter((token) => (toolkit.categories ?? []).some((category: unknown) => String(category).toLowerCase().includes(token))),
-      scopes: tokens.filter((token) => scopes.some((scope) => scope.toLowerCase().includes(token))),
-      actions: tokens.filter((token) => actions.some((action) => `${action.name} ${action.description} ${action.slug}`.toLowerCase().includes(token))),
-    };
-    const matchedTerms = [...new Set(Object.values(fieldMatches).flat())];
-    const matchedFields = Object.entries(fieldMatches)
-      .filter(([, terms]) => terms.length > 0)
-      .map(([field]) => field);
-
-    const nameBoost = tokens.reduce((sum, token) => {
-      const normalized = toolkit.name.toLowerCase().replace(/[^a-z0-9]+/g, "");
-      if (normalized === token || slug === token) return sum + 16;
-      if (normalized.includes(token) || slug.includes(token)) return sum + 8;
-      return sum;
-    }, 0);
-    const score = tokens.reduce((sum, token) => sum + (toolkitText.includes(token) ? 1 : 0), 0) + nameBoost;
-    if (score === 0 && actionMatches.length === 0) continue;
-
-    const reason = `${toolkit.name} matched ${matchedTerms.length} of ${tokens.length} requirement terms across ${matchedFields.join(", ") || "metadata"}. It exposes ${actions.length} actions and requests ${scopes.length} scopes.`;
-
-    const candidate = {
-      slug,
-      name: toolkit.name,
-      score: score + actionMatches.reduce((sum, action) => sum + action.score, 0),
-      scopeCount: scopes.length,
-      scopes,
-      actions: actionMatches.length > 0 ? actionMatches : actions.slice(0, 2).map((action) => ({ slug: action.slug, name: action.name, score: 0 })),
-    };
-    candidates.push(candidate);
-    research.push({
-      slug,
-      name: toolkit.name,
-      score: candidate.score,
-      matchedTerms,
-      matchedFields,
-      categories: toolkit.categories ?? [],
-      scopes,
-      toolsCount: toolkit.toolsCount ?? actions.length,
-      scopeCount: scopes.length,
-      actions: candidate.actions,
-      reason,
-    });
-  }
-
-  candidates.sort((a, b) => b.score - a.score || a.scopeCount - b.scopeCount || a.name.localeCompare(b.name));
-  const topApps = candidates.slice(0, 8);
-  const directApps = tokens
-    .map((token) => {
-      const matches = topApps.filter((app) => {
-        const normalized = app.name.toLowerCase().replace(/[^a-z0-9]+/g, "");
-        return normalized.includes(token) || app.slug.includes(token);
-      });
-      return matches.sort((a, b) => {
-        const aExact = a.slug === token || a.name.toLowerCase().replace(/[^a-z0-9]+/g, "") === token ? 1 : 0;
-        const bExact = b.slug === token || b.name.toLowerCase().replace(/[^a-z0-9]+/g, "") === token ? 1 : 0;
-        if (bExact !== aExact) return bExact - aExact;
-        if (b.score !== a.score) return b.score - a.score;
-        return a.scopeCount - b.scopeCount;
-      })[0];
-    })
-    .filter((app): app is IdeaApp => Boolean(app))
-    .filter((app, index, apps) => apps.findIndex((candidate) => candidate.slug === app.slug) === index);
-  const requiredApps = directApps;
-
-  const combinationList: IdeaCombination[] = [];
-  for (let size = 1; size <= Math.min(3, topApps.length); size += 1) {
-    for (const combo of combinations(topApps, size)) {
-      if (requiredApps.length > 0 && requiredApps.length <= size && !requiredApps.every((app) => combo.includes(app))) {
+    for (const candidate of candidates) {
+      if (seenToolkits.has(candidate.toolkit.slug)) {
         continue;
       }
 
-      const covered = new Set<string>();
-      const addsNewCoverage = combo.every((app) => {
-        const appTokens = tokens.filter((token) => {
-          const text = [app.name, ...app.actions.map((action) => action.name)].join(" ").toLowerCase();
-          return text.includes(token);
-        });
-        const newTokens = appTokens.filter((token) => !covered.has(token));
-        if (newTokens.length === 0) return false;
-        newTokens.forEach((token) => covered.add(token));
-        return true;
-      });
-      if (!addsNewCoverage) continue;
-      const score = combo.reduce((sum, app) => sum + app.score, 0);
-      const totalScopes = combo.reduce((sum, app) => sum + app.scopeCount, 0);
-      const steps: string[] = [];
+      seenToolkits.add(candidate.toolkit.slug);
+      addPlan(buildPlan([candidate], analysis));
 
-      for (const app of combo) {
-        steps.push(`Connect ${app.name} if this account does not already have an active connection.`);
-        const action = app.actions[0];
-        if (action) {
-          steps.push(`Run ${action.name} (${action.slug}) for the ${app.name} part of the workflow.`);
-        }
-        if (app.scopeCount > 0) {
-          steps.push(`Review and approve the ${app.scopeCount} requested ${app.name} scopes before connecting.`);
-        }
+      if (seenToolkits.size >= 4) {
+        break;
       }
-
-      if (combo.length > 1) {
-        steps.push("Chain the tool results in order, passing only the fields needed by the next step.");
-      }
-
-      combinationList.push({
-        rank: 0,
-        score,
-        totalScopes,
-        apps: combo,
-        steps,
-      });
     }
   }
 
-  const exactDirectAppCount = (combo: IdeaCombination) =>
-    combo.apps.filter((app) =>
-      tokens.some((token) => app.slug === token || app.name.toLowerCase().replace(/[^a-z0-9]+/g, "") === token)
-    ).length;
+  plans.sort(
+    (a, b) =>
+      b.score - a.score ||
+      b.apps.length - a.apps.length ||
+      a.totalScopes - b.totalScopes
+  );
 
-  const tokenCoverage = (combo: IdeaCombination) => {
-    const text = combo.apps.map((app) => [app.name, ...app.actions.map((action) => action.name)].join(" ")).join(" ").toLowerCase();
-    return tokens.reduce((sum, token) => sum + (text.includes(token) ? 1 : 0), 0);
-  };
-
-  combinationList.sort((a, b) => {
-    const coverageDiff = tokenCoverage(b) - tokenCoverage(a);
-    if (coverageDiff !== 0) return coverageDiff;
-    const directDiff = exactDirectAppCount(b) - exactDirectAppCount(a);
-    if (directDiff !== 0) return directDiff;
-    if (a.apps.length !== b.apps.length) return a.apps.length - b.apps.length;
-    if (b.score !== a.score) return b.score - a.score;
-    if (a.totalScopes !== b.totalScopes) return a.totalScopes - b.totalScopes;
-    return a.apps.map((app) => app.name).join().localeCompare(b.apps.map((app) => app.name).join());
-  });
-  const ranked = combinationList.slice(0, limit).map((item, index) => ({ ...item, rank: index + 1 }));
+  const maxPlans = Math.max(1, Math.min(4, Math.trunc(limit) || 4));
+  const ranked = plans.slice(0, maxPlans).map((plan, index) => ({
+    ...plan,
+    rank: index + 1,
+  }));
 
   return {
-    requirement,
-    combinations: ranked,
-    candidates: candidates.slice(0, 12),
-    research: research
-      .sort((a, b) => b.score - a.score || a.scopeCount - b.scopeCount || a.name.localeCompare(b.name))
-      .slice(0, 8),
-  };
-}
-export type AiIdeaEnhancement = {
-  model: string;
-  steps: string[];
-  source: string;
-};
-
-export async function enhanceIdeaSearchWithConfiguredModel(
-  userId: string,
-  requirement: string,
-  result: { combinations: IdeaCombination[]; candidates: IdeaApp[] }
-): Promise<AiIdeaEnhancement | null> {
-  const enhanced = await generateLlmSteps(userId, requirement, result);
-  if (!enhanced) return null;
-  return {
-    model: enhanced.model,
-    steps: enhanced.steps,
-    source: enhanced.source,
+    requirement: prompt,
+    interpretation: {
+      apps: [
+        ...new Set(
+          (mentionSlugs.length > 0
+            ? analysis.mentions.map((mention) => mention.name)
+            : ranked[0]?.apps.map((app) => app.name) ?? []
+          ).filter(Boolean)
+        ),
+      ],
+      intents: analysis.intents,
+      objects: [
+        ...new Set(
+          analysis.objectWords
+            .filter((word) => !DISPLAY_INTENT_WORDS.has(word))
+            .filter((word) => word.length > 2)
+            .slice(0, 8)
+        ),
+      ],
+      clauses: analysis.clauses.map((clause) => clause.text),
+    },
+    best: ranked[0] ?? null,
+    alternatives: ranked.slice(1),
+    note:
+      ranked.length > 0
+        ? "Steps only — no code is returned. Connect any required app, then open a step in the playground to generate its JSON arguments."
+        : "No workflow plan could be built from the current catalog.",
   };
 }

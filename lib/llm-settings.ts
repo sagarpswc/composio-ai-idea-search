@@ -283,7 +283,21 @@ async function consumeUsage(userId: string, config: ResolvedLlmConfig): Promise<
   return true;
 }
 
-async function callOpenAiCompatible(config: ResolvedLlmConfig, prompt: string): Promise<string | null> {
+export type LlmTextOptions = {
+  maxTokens?: number;
+  temperature?: number;
+  timeoutMs?: number;
+};
+
+type LlmCallOptions = LlmTextOptions & {
+  signal?: AbortSignal;
+};
+
+async function callOpenAiCompatible(
+  config: ResolvedLlmConfig,
+  prompt: string,
+  options: LlmCallOptions = {}
+): Promise<string | null> {
   const baseUrl = config.baseUrl || DEFAULT_BASE_URLS[config.provider];
   const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/chat/completions`, {
     method: "POST",
@@ -291,11 +305,12 @@ async function callOpenAiCompatible(config: ResolvedLlmConfig, prompt: string): 
       "Content-Type": "application/json",
       Authorization: `Bearer ${config.apiKey}`,
     },
+    signal: options.signal,
     body: JSON.stringify({
       model: config.model,
       messages: [{ role: "user", content: prompt }],
-      temperature: 0,
-      max_tokens: 180,
+      temperature: options.temperature ?? 0,
+      max_tokens: options.maxTokens ?? 180,
     }),
   });
 
@@ -305,7 +320,11 @@ async function callOpenAiCompatible(config: ResolvedLlmConfig, prompt: string): 
   return typeof content === "string" ? content : null;
 }
 
-async function callAnthropic(config: ResolvedLlmConfig, prompt: string): Promise<string | null> {
+async function callAnthropic(
+  config: ResolvedLlmConfig,
+  prompt: string,
+  options: LlmCallOptions = {}
+): Promise<string | null> {
   const baseUrl = config.baseUrl || DEFAULT_BASE_URLS.anthropic;
   const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/messages`, {
     method: "POST",
@@ -314,9 +333,11 @@ async function callAnthropic(config: ResolvedLlmConfig, prompt: string): Promise
       "x-api-key": config.apiKey,
       "anthropic-version": "2023-06-01",
     },
+    signal: options.signal,
     body: JSON.stringify({
       model: config.model,
-      max_tokens: 180,
+      max_tokens: options.maxTokens ?? 180,
+      temperature: options.temperature ?? 0,
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -327,22 +348,72 @@ async function callAnthropic(config: ResolvedLlmConfig, prompt: string): Promise
   return typeof text === "string" ? text : null;
 }
 
-async function callOllama(config: ResolvedLlmConfig, prompt: string): Promise<string | null> {
+async function callOllama(
+  config: ResolvedLlmConfig,
+  prompt: string,
+  options: LlmCallOptions = {}
+): Promise<string | null> {
   const baseUrl = config.baseUrl || DEFAULT_BASE_URLS.ollama;
   const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: options.signal,
     body: JSON.stringify({
       model: config.model,
       prompt,
       stream: false,
-      options: { temperature: 0, num_predict: 180 },
+      options: {
+        temperature: options.temperature ?? 0,
+        num_predict: options.maxTokens ?? 180,
+      },
     }),
   });
 
   if (!response.ok) return null;
   const data = (await response.json()) as { response?: unknown };
   return typeof data.response === "string" ? data.response : null;
+}
+
+export async function generateLlmText(
+  userId: string,
+  prompt: string,
+  options: LlmTextOptions = {}
+): Promise<{
+  text: string;
+  model: string;
+  provider: LlmProvider;
+  source: "user" | "shared" | "local";
+} | null> {
+  const config = await resolveLlmConfig(userId);
+  if (!config) return null;
+  if (!(await consumeUsage(userId, config))) return null;
+
+  const controller = new AbortController();
+  const timeoutMs = Math.max(1000, Math.min(options.timeoutMs ?? 45000, 120000));
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const callOptions: LlmCallOptions = { ...options, signal: controller.signal };
+
+  try {
+    const text =
+      config.provider === "anthropic"
+        ? await callAnthropic(config, prompt, callOptions)
+        : config.provider === "ollama"
+          ? await callOllama(config, prompt, callOptions)
+          : await callOpenAiCompatible(config, prompt, callOptions);
+
+    if (!text?.trim()) return null;
+
+    return {
+      text: text.trim(),
+      model: config.model,
+      provider: config.provider,
+      source: config.source,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function generateLlmSteps(

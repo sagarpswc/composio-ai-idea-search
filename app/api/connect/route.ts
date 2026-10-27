@@ -33,7 +33,9 @@ async function createConnection(
 
   const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
   const origin = configuredOrigin || new URL(request.url).origin;
-  const callbackUrl = `${origin}${returnPath}?connected=${encodeURIComponent(toolkit)}`;
+  const callback = new URL(returnPath, origin);
+  callback.searchParams.set("connected", toolkit);
+  const callbackUrl = callback.toString();
 
   const connectionRequest = await session.authorize(toolkit, { callbackUrl });
 
@@ -76,10 +78,15 @@ export async function GET(request: Request) {
     );
   }
 
+  const returnTo = requestUrl.searchParams.get("returnTo");
   const returnPath =
-    requestUrl.searchParams.get("returnTo") === "app"
+    returnTo === "app"
       ? `/dashboard/apps/${encodeURIComponent(toolkit)}`
-      : "/dashboard";
+      : returnTo === "playground"
+        ? "/dashboard?tab=playground"
+        : returnTo === "ideas"
+          ? "/dashboard?tab=ideas"
+          : "/dashboard";
 
   try {
     const outcome = await createConnection(request, toolkit, returnPath);
