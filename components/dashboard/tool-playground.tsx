@@ -235,7 +235,7 @@ function ConnectionIssueNotice({
               ? `${issue.appName} needs a connection`
               : "A connection may be required"}
           </p>
-          <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+          <p className="mt-1 break-words text-[11px] leading-5 text-muted-foreground">
             {issue.message}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -543,7 +543,11 @@ export function ToolPlayground({
         });
       }
     } catch (error) {
-      const message = errorMessage(error, "Tool execution failed.");
+      let message = errorMessage(error, "Tool execution failed.");
+      if (/meta tool|ToolRouterV2_BadRequest|Cannot execute meta tool/i.test(message)) {
+        message =
+          "This is a Composio management tool and cannot be run directly. Choose an app action from the catalog or rebuild the setup with a specific app.";
+      }
       setExecutionError(message);
 
       if (/connect|connection|auth|credential|oauth|account|permission/i.test(message)) {
@@ -638,9 +642,11 @@ export function ToolPlayground({
             </form>
 
             {buildError ? (
-              <Alert variant="destructive">
+              <Alert variant="destructive" className="overflow-hidden">
                 <TriangleAlert />
-                <AlertDescription>{buildError}</AlertDescription>
+                <AlertDescription className="break-words whitespace-pre-wrap">
+                  {buildError}
+                </AlertDescription>
               </Alert>
             ) : null}
 
@@ -946,9 +952,11 @@ export function ToolPlayground({
             </form>
 
             {executionError ? (
-              <Alert variant="destructive" className="mt-3">
+              <Alert variant="destructive" className="mt-3 overflow-hidden">
                 <TriangleAlert />
-                <AlertDescription>{executionError}</AlertDescription>
+                <AlertDescription className="break-words whitespace-pre-wrap">
+                  {executionError}
+                </AlertDescription>
               </Alert>
             ) : null}
 

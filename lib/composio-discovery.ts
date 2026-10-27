@@ -623,7 +623,7 @@ async function buildDiscoveryIndex(): Promise<DiscoveryIndex> {
     }
 
     const slug = String(toolkit.slug ?? key).trim().toLowerCase();
-    if (!slug) {
+    if (!slug || slug === "composio") {
       continue;
     }
 
