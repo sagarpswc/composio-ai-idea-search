@@ -21,8 +21,6 @@ const topoFieldSource = `<!DOCTYPE html>
 
     <div class="fixed inset-0 z-0 pointer-events-none">
         <canvas id="topo-canvas" class="w-full h-full"></canvas>
-        <div class="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-black z-10"></div>
-        <div class="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,#000_100%)] opacity-90 z-10"></div>
     </div>
 
     <main class="relative z-20 flex flex-col min-h-screen">
