@@ -78,31 +78,80 @@ async function writeJson(file: string, value: unknown): Promise<void> {
   await rename(temporaryFile, file);
 }
 
-function encryptionKey(): Buffer {
-  const secret = process.env.AUTH_SECRET?.trim();
-  if (!secret || secret.length < 32) {
-    throw new Error("AUTH_SECRET must be set to a random string of at least 32 characters.");
+function encryptionSecrets(): string[] {
+  const secrets: string[] = [];
+  const dedicated = process.env.LLM_ENCRYPTION_KEY?.trim();
+  if (dedicated && dedicated.length >= 32) {
+    secrets.push(dedicated);
   }
-  return crypto.scryptSync(secret, "composio-llm-settings", 32);
+
+  const authSecret = process.env.AUTH_SECRET?.trim();
+  if (authSecret && authSecret.length >= 32) {
+    secrets.push(authSecret);
+  }
+
+  if (secrets.length === 0) {
+    throw new Error("AUTH_SECRET or LLM_ENCRYPTION_KEY must be set to a random string of at least 32 characters.");
+  }
+
+  return [...new Set(secrets)];
+}
+
+function encryptionKey(secret: string): Buffer {
+  return crypto.scryptSync(secret, "composio-llm-settings-v2", 32);
 }
 
 function encrypt(value: string): string {
-  const key = encryptionKey();
+  const key = encryptionKey(encryptionSecrets()[0]);
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
   const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-  return `${iv.toString("base64")}:${cipher.getAuthTag().toString("base64")}:${encrypted.toString("base64")}`;
+  return `v2:${iv.toString("base64")}:${cipher.getAuthTag().toString("base64")}:${encrypted.toString("base64")}`;
 }
 
 function decrypt(value: string): string {
-  const [ivText, tagText, encryptedText] = value.split(":");
+  const parts = value.split(":");
+  const versioned = parts[0] === "v2";
+  const [ivText, tagText, encryptedText] = versioned ? parts.slice(1) : parts;
   if (!ivText || !tagText || !encryptedText) throw new Error("Invalid encrypted API key.");
-  const key = encryptionKey();
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivText, "base64"));
-  decipher.setAuthTag(Buffer.from(tagText, "base64"));
-  const decrypted = decipher.update(Buffer.from(encryptedText, "base64"));
-  const final = decipher.final();
-  return Buffer.concat([decrypted, final]).toString("utf8");
+
+  const iv = Buffer.from(ivText, "base64");
+  const tag = Buffer.from(tagText, "base64");
+  const encrypted = Buffer.from(encryptedText, "base64");
+  const salt = versioned ? "composio-llm-settings-v2" : "composio-llm-settings";
+
+  for (const secret of encryptionSecrets()) {
+    try {
+      const key = crypto.scryptSync(secret, salt, 32);
+      const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+      decipher.setAuthTag(tag);
+      const decrypted = decipher.update(encrypted);
+      const final = decipher.final();
+      return Buffer.concat([decrypted, final]).toString("utf8");
+    } catch {
+      // Try the next available secret or legacy salt.
+    }
+  }
+
+  // Legacy v1 values were encrypted with the auth secret and the original salt.
+  if (versioned) {
+    throw new Error("Invalid encrypted API key.");
+  }
+
+  for (const secret of encryptionSecrets()) {
+    try {
+      const key = crypto.scryptSync(secret, "composio-llm-settings", 32);
+      const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+      decipher.setAuthTag(tag);
+      const decrypted = decipher.update(encrypted);
+      const final = decipher.final();
+      return Buffer.concat([decrypted, final]).toString("utf8");
+    } catch {
+      // Try the next available secret.
+    }
+  }
+
+  throw new Error("Invalid encrypted API key.");
 }
 
 type SettingsFile = Record<string, StoredLlmSettings>;

@@ -26,6 +26,10 @@ export async function POST(request: Request) {
       return apiError("A requirement is required.", 400);
     }
 
+    if (requirement.length > 4000) {
+      return apiError("Keep the requirement below 4,000 characters.", 400);
+    }
+
     const requestedLimit = typeof body.limit === "number" ? body.limit : 8;
     const limit = Number.isFinite(requestedLimit)
       ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 20)
