@@ -23,14 +23,6 @@ const topoFieldSource = `<!DOCTYPE html>
         <canvas id="topo-canvas" class="w-full h-full"></canvas>
     </div>
 
-    <main class="relative z-20 flex flex-col min-h-screen">
-        <header class="container mx-auto px-6 py-6 flex items-center justify-between reveal opacity-0 translate-y-4 transition-all duration-1000 ease-out">
-            <div class="flex items-center gap-2 text-white hover:text-neutral-300 transition-colors cursor-pointer">
-                <iconify-icon icon="solar:radar-linear" width="24"></iconify-icon>
-                <span class="font-light text-sm tracking-tight">NexusNode</span>
-            </div>
-        </header>
-    </main>
 
     <script>
         setTimeout(() => {
