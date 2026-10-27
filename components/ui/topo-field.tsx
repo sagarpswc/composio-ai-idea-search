@@ -68,13 +68,6 @@ const topoFieldSource = `<!DOCTYPE html>
                     vec2 st = gl_FragCoord.xy / u_resolution.xy;
                     st.x *= u_resolution.x / u_resolution.y;
 
-                    float gridSize = 48.0 * u_dpr;
-                    vec2 gridSt = gl_FragCoord.xy / gridSize;
-                    vec2 gridFract = fract(gridSt);
-                    float lineThickness = 1.0 / gridSize;
-                    float gridLines = step(1.0 - lineThickness, gridFract.x) + step(1.0 - lineThickness, gridFract.y);
-                    gridLines = clamp(gridLines, 0.0, 1.0) * 0.12;
-
                     float noiseScale = 1.4;
                     vec2 noisePos = st * noiseScale + vec2(u_time * 0.015, u_time * 0.025);
                     float n = snoise(noisePos) * 0.5 + 0.5;
@@ -84,7 +77,6 @@ const topoFieldSource = `<!DOCTYPE html>
                     float topoLines = smoothstep(0.02, 0.00, triangleWave) * 0.45;
 
                     vec3 color = vec3(0.0);
-                    color += vec3(1.0) * gridLines;
                     color += vec3(1.0) * topoLines;
 
                     gl_FragColor = vec4(color, 1.0);
