@@ -70,7 +70,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ...result,
       connections,
-      note: "Steps only — no implementation code is returned. Each step can be opened in the playground to generate its JSON arguments.",
+      note: result.note,
     });
   } catch (error) {
     return apiError(error);

@@ -3,6 +3,45 @@ import path from "node:path";
 
 const CACHE_FILE = path.join(process.cwd(), ".data", "composio-cache.json");
 
+const GENERIC_QUERY_TOKENS = new Set([
+  "add",
+  "apply",
+  "archive",
+  "cancel",
+  "change",
+  "check",
+  "create",
+  "delete",
+  "download",
+  "edit",
+  "export",
+  "fetch",
+  "find",
+  "generate",
+  "get",
+  "insert",
+  "list",
+  "load",
+  "make",
+  "modify",
+  "move",
+  "new",
+  "open",
+  "post",
+  "read",
+  "remove",
+  "retrieve",
+  "save",
+  "search",
+  "send",
+  "set",
+  "show",
+  "trash",
+  "update",
+  "upload",
+  "view",
+]);
+
 const HIGH_SPECIFICITY_TOKENS = new Set([
   "check",
   "comment",
@@ -1055,6 +1094,10 @@ function scoreAction(
       score += 12;
     }
 
+    if (/\bupload\b/.test(action.name.toLowerCase())) {
+      score += 8;
+    }
+
     if (
       /\bsheet\b/.test(action.name.toLowerCase()) &&
       !objectTokens.has("sheet") &&
@@ -1287,7 +1330,14 @@ function scoreGlobalActions(
       );
       const score = result.score + Math.min(metadataScore, 6);
 
-      if (score <= 0) {
+      if (score < 20) {
+        continue;
+      }
+
+      if (
+        objectTokens.size > 0 &&
+        !result.matchedTerms.some((term) => !GENERIC_QUERY_TOKENS.has(term.toLowerCase()))
+      ) {
         continue;
       }
 
