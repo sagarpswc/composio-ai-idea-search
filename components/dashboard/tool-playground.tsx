@@ -1031,7 +1031,7 @@ export function ToolPlayground({
 
               <Separator className="mb-3" />
 
-              <pre className="min-h-0 flex-1 overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-[11px] leading-5">
+              <pre className="max-h-96 min-h-0 flex-1 overflow-y-auto rounded-lg border bg-muted/30 p-3 font-mono text-[11px] leading-5">
                 {JSON.stringify(execution.data, null, 2)}
               </pre>
             </>
