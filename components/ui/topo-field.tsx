@@ -6,134 +6,6 @@ import {
   type CSSProperties,
 } from "react";
 
-const topoFieldSource = `<!DOCTYPE html>
-<html lang="en" class="scroll-smooth">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NexusNode Infrastructure</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
-</head>
-<body class="bg-black text-white font-sans min-h-screen relative overflow-x-hidden selection:bg-white/20 selection:text-white font-light" style="background-color: #000; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;">
-
-    <div class="fixed inset-0 z-0 pointer-events-none">
-        <canvas id="topo-canvas" class="w-full h-full"></canvas>
-    </div>
-
-
-    <script>
-        setTimeout(() => {
-            document.querySelectorAll('.reveal').forEach(el => {
-                el.classList.remove('opacity-0', 'translate-y-4');
-            });
-        }, 100);
-
-        const canvas = document.getElementById('topo-canvas');
-        const gl = canvas.getContext('webgl', { alpha: false, antialias: false, depth: false });
-
-        if (gl) {
-            const vsSource = \`
-                attribute vec2 a_position;
-                void main() { gl_Position = vec4(a_position, 0.0, 1.0); }
-            \`;
-
-            const fsSource = \`
-                precision highp float;
-                uniform vec2 u_resolution;
-                uniform float u_time;
-                uniform float u_dpr;
-
-                vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
-                float snoise(vec2 v){
-                    const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
-                    vec2 i  = floor(v + dot(v, C.yy) );
-                    vec2 x0 = v -   i + dot(i, C.xx);
-                    vec2 i1; i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
-                    vec4 x12 = x0.xyxy + C.xxzz; x12.xy -= i1;
-                    i = mod(i, 289.0);
-                    vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 )) + i.x + vec3(0.0, i1.x, 1.0 ));
-                    vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
-                    m = m*m; m = m*m;
-                    vec3 x = 2.0 * fract(p * C.www) - 1.0;
-                    vec3 h = abs(x) - 0.5; vec3 ox = floor(x + 0.5);
-                    vec3 a0 = x - ox; m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
-                    vec3 g; g.x  = a0.x  * x0.x  + h.x  * x0.y; g.yz = a0.yz * x12.xz + h.yz * x12.yw;
-                    return 130.0 * dot(m, g);
-                }
-
-                void main() {
-                    vec2 st = gl_FragCoord.xy / u_resolution.xy;
-                    st.x *= u_resolution.x / u_resolution.y;
-
-                    float noiseScale = 1.4;
-                    vec2 noisePos = st * noiseScale + vec2(u_time * 0.015, u_time * 0.025);
-                    float n = snoise(noisePos) * 0.5 + 0.5;
-                    float numBands = 10.0;
-                    float bandVal = n * numBands;
-                    float triangleWave = abs(fract(bandVal) - 0.5) * 2.0;
-                    float topoLines = smoothstep(0.02, 0.00, triangleWave) * 0.45;
-
-                    vec3 color = vec3(0.0);
-                    color += vec3(1.0) * topoLines;
-
-                    gl_FragColor = vec4(color, 1.0);
-                }
-            \`;
-
-            function createShader(gl, type, source) {
-                const shader = gl.createShader(type);
-                gl.shaderSource(shader, source);
-                gl.compileShader(shader);
-                return shader;
-            }
-
-            const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
-            const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
-            const program = gl.createProgram();
-            gl.attachShader(program, vertexShader);
-            gl.attachShader(program, fragmentShader);
-            gl.linkProgram(program);
-            gl.useProgram(program);
-
-            const positionBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-
-            const positionLocation = gl.getAttribLocation(program, "a_position");
-            gl.enableVertexAttribArray(positionLocation);
-            gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
-
-            const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
-            const timeLocation = gl.getUniformLocation(program, "u_time");
-            const dprLocation = gl.getUniformLocation(program, "u_dpr");
-
-            function resizeCanvas() {
-                const dpr = window.devicePixelRatio || 1;
-                canvas.width = window.innerWidth * dpr;
-                canvas.height = window.innerHeight * dpr;
-                gl.viewport(0, 0, canvas.width, canvas.height);
-                gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
-                gl.uniform1f(dprLocation, dpr);
-            }
-
-            window.addEventListener('resize', resizeCanvas);
-            resizeCanvas();
-
-            let startTime = performance.now();
-            function render(time) {
-                gl.uniform1f(timeLocation, (time - startTime) * 0.001);
-                gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-                requestAnimationFrame(render);
-            }
-            requestAnimationFrame(render);
-        }
-    </script>
-</body>
-</html>`;
-
 type TopoFieldMode = "dark" | "light";
 
 export type TopoFieldProps = {
@@ -148,8 +20,6 @@ export type TopoFieldProps = {
   className?: string;
   style?: CSSProperties;
 };
-
-const LIGHT_PAPER = "#eef1f6";
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
@@ -184,15 +54,126 @@ function useAutomaticMode(enabled: boolean) {
   return autoMode;
 }
 
+function buildTopoSource(mode: TopoFieldMode, length: number, density: number) {
+  const background = mode === "light" ? "vec3(0.97, 0.98, 0.97)" : "vec3(0.0, 0.0, 0.0)";
+  const lineColor = "vec3(0.45, 0.90, 0.65)";
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Topo Field</title>
+</head>
+<body style="margin:0;background:transparent;overflow:hidden;">
+  <canvas id="topo-canvas" style="position:fixed;inset:0;width:100%;height:100%;"></canvas>
+  <script>
+    const canvas = document.getElementById('topo-canvas');
+    const gl = canvas.getContext('webgl', { alpha: false, antialias: false, depth: false });
+
+    if (gl) {
+      const vsSource = \`
+        attribute vec2 a_position;
+        void main() { gl_Position = vec4(a_position, 0.0, 1.0); }
+      \`;
+
+      const fsSource = \`
+        precision highp float;
+        uniform vec2 u_resolution;
+        uniform float u_time;
+
+        vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
+        float snoise(vec2 v){
+          const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+          vec2 i = floor(v + dot(v, C.yy));
+          vec2 x0 = v - i + dot(i, C.xx);
+          vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+          vec4 x12 = x0.xyxy + C.xxzz; x12.xy -= i1;
+          i = mod(i, 289.0);
+          vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+          vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+          m = m*m; m = m*m;
+          vec3 x = 2.0 * fract(p * C.www) - 1.0;
+          vec3 h = abs(x) - 0.5; vec3 ox = floor(x + 0.5);
+          vec3 a0 = x - ox; m *= 1.79284291400159 - 0.85373472095314 * (a0*a0 + h*h);
+          vec3 g; g.x = a0.x * x0.x + h.x * x0.y; g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+          return 130.0 * dot(m, g);
+        }
+
+        void main() {
+          vec2 st = gl_FragCoord.xy / u_resolution.xy;
+          st.x *= u_resolution.x / u_resolution.y;
+
+          float noiseScale = ${length.toFixed(3)} * 1.4;
+          vec2 noisePos = st * noiseScale + vec2(u_time * 0.015, u_time * 0.025);
+          float n = snoise(noisePos) * 0.5 + 0.5;
+
+          float numBands = ${density.toFixed(3)} * 10.0;
+          float bandVal = n * numBands;
+          float triangleWave = abs(fract(bandVal) - 0.5) * 2.0;
+          float topoLines = smoothstep(0.02, 0.00, triangleWave) * 0.45;
+
+          vec3 color = ${background};
+          color += ${lineColor} * topoLines;
+
+          gl_FragColor = vec4(color, 1.0);
+        }
+      \`;
+
+      function createShader(type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        return shader;
+      }
+
+      const program = gl.createProgram();
+      gl.attachShader(program, createShader(gl.VERTEX_SHADER, vsSource));
+      gl.attachShader(program, createShader(gl.FRAGMENT_SHADER, fsSource));
+      gl.linkProgram(program);
+      gl.useProgram(program);
+
+      const positionBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+
+      const positionLocation = gl.getAttribLocation(program, "a_position");
+      gl.enableVertexAttribArray(positionLocation);
+      gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+      const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
+      const timeLocation = gl.getUniformLocation(program, "u_time");
+
+      function resizeCanvas() {
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = window.innerWidth * dpr;
+        canvas.height = window.innerHeight * dpr;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+      }
+
+      window.addEventListener('resize', resizeCanvas);
+      resizeCanvas();
+
+      let startTime = performance.now();
+      function render(time) {
+        gl.uniform1f(timeLocation, (time - startTime) * 0.001);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        requestAnimationFrame(render);
+      }
+      requestAnimationFrame(render);
+    }
+  </script>
+</body>
+</html>`;
+}
+
 export default function TopoField({
   mode = "dark",
   speed = 1,
   length = 1,
   density = 1,
   opacity = 1,
-  hue = 0,
-  saturation = 1,
-  brightness = 1,
   className,
   style,
 }: TopoFieldProps) {
@@ -200,32 +181,28 @@ export default function TopoField({
   const automaticMode = useAutomaticMode(mode === "auto");
   const resolvedMode: TopoFieldMode =
     mode === "auto" ? automaticMode : mode === "light" ? "light" : "dark";
-  const background = resolvedMode === "light" ? LIGHT_PAPER : "#000000";
 
   const safeSpeed = clamp(speed, 0, 3);
   const safeLength = clamp(length, 0.35, 2.5);
   const safeDensity = clamp(density, 0.25, 2.5);
   const safeOpacity = clamp(opacity, 0.05, 1);
-  const safeHue = clamp(hue, -180, 180);
-  const safeSaturation = clamp(saturation, 0, 2);
-  const safeBrightness = clamp(brightness, 0.35, 1.65);
 
-  const source = useMemo(() => topoFieldSource, [resolvedMode, safeLength, safeDensity]);
+  const source = useMemo(
+    () => buildTopoSource(resolvedMode, safeLength, safeDensity),
+    [resolvedMode, safeLength, safeDensity]
+  );
 
   useEffect(() => {
     const frame = iframeRef.current?.contentWindow;
     if (!frame) return;
+    // Speed is baked into the source for this implementation, so only opacity is live.
     frame.postMessage({ type: "threeui-controls", controls: { speed: safeSpeed, opacity: safeOpacity } }, "*");
   }, [safeSpeed, safeOpacity, source]);
-
-  const filter =
-    safeHue === 0 && safeSaturation === 1 && safeBrightness === 1
-      ? undefined
-      : `hue-rotate(${safeHue}deg) saturate(${safeSaturation}) brightness(${safeBrightness})`;
 
   return (
     <iframe
       ref={iframeRef}
+      suppressHydrationWarning
       className={className}
       title="Topo Field"
       srcDoc={source}
@@ -235,9 +212,9 @@ export default function TopoField({
         display: "block",
         width: "100%",
         height: "100%",
-        border: 0,
-        background,
-        filter,
+        borderWidth: 0,
+        borderStyle: "none",
+        backgroundColor: "transparent",
         ...style,
       }}
     />
